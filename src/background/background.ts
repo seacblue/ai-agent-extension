@@ -1,5 +1,10 @@
-// 存储当前活跃的定时器
+// 存储当前活跃的定时器和 AI 客户端
 let activeTimers: NodeJS.Timeout[] = []
+let currentAIProcess: { abort: () => void } | null = null
+
+// 导入 AI 客户端
+import { DoubaoAIClient, ChatMessage } from './ai-client'
+import { getApiKeyFromStorage, saveApiKey } from '../config/api'
 
 // 监听来自 DevTools Panel 和 Content Script 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -11,6 +16,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true
     } else if (request.type === 'TERMINATE_PROCESS') {
         handleTerminate(sendResponse)
+        return true
+    } else if (request.type === 'SET_API_KEY') {
+        handleSetApiKey(request.apiKey, sendResponse)
+        return true
+    } else if (request.type === 'GET_API_KEY') {
+        handleGetApiKey(sendResponse)
         return true
     }
 })
@@ -31,82 +42,87 @@ chrome.runtime.onConnect.addListener((port) => {
 // 处理来自 DevTools Panel 的问题
 async function handleQuestion(question: string, sendResponse: (response: any) => void) {
     try {
-        // 模拟 AI 思考过程
-        const thinkingSteps = [
-            `分析用户问题: "${question}"`,
-            '制定回答策略和搜索方案',
-            '调用知识库搜索相关信息',
-            '整理搜索结果并形成结构化回答',
-            '优化回答内容，确保清晰易懂'
+        // 获取 API 密钥
+        const apiKey = await getApiKeyFromStorage()
+        
+        if (!apiKey) {
+            sendResponse({
+                type: 'error',
+                error: '请先在设置中配置豆包 AI API 密钥',
+                status: 'error'
+            })
+            return
+        }
+
+        // 创建 AI 客户端
+        const aiClient = new DoubaoAIClient(apiKey)
+        
+        // 构建消息
+        const messages: ChatMessage[] = [
+            {
+                role: 'system',
+                content: '你是一个智能助手，专门帮助用户解答问题和提供建议。请用简洁明了的方式回答用户的问题。'
+            },
+            {
+                role: 'user',
+                content: question
+            }
         ]
 
-        // 生成最终回答
-        const answer = `这是对问题"${question}"的详细回答。经过分析后，我为您提供以下解决方案：\n1. 首先理解问题的核心需求\n2. 分析可能的解决方案\n3. 提供具体的实施建议\n4. 给出相关的注意事项\n\n希望这个回答对您有帮助！`
-
-        // 获取当前活动的 DevTools Panel
-        chrome.runtime.getContexts({ contextTypes: ['DEVELOPER_TOOLS'] }, (contexts) => {
-            if (contexts.length > 0) {
-                // 分步骤发送思考过程，模拟真实的思考延迟
-                const timer1 = setTimeout(() => {
-                    chrome.runtime.sendMessage({
-                        type: 'thinking',
-                        content: thinkingSteps[0]
-                    })
-                }, 500)
-                activeTimers.push(timer1)
-
-                const timer2 = setTimeout(() => {
-                    chrome.runtime.sendMessage({
-                        type: 'thinking',
-                        content: thinkingSteps[1]
-                    })
-                }, 1500)
-                activeTimers.push(timer2)
-
-                const timer3 = setTimeout(() => {
-                    chrome.runtime.sendMessage({
-                        type: 'thinking',
-                        content: thinkingSteps[2]
-                    })
-                }, 2500)
-                activeTimers.push(timer3)
-
-                const timer4 = setTimeout(() => {
-                    chrome.runtime.sendMessage({
-                        type: 'thinking',
-                        content: thinkingSteps[3]
-                    })
-                }, 3500)
-                activeTimers.push(timer4)
-
-                const timer5 = setTimeout(() => {
-                    chrome.runtime.sendMessage({
-                        type: 'thinking',
-                        content: thinkingSteps[4]
-                    })
-                }, 4500)
-                activeTimers.push(timer5)
-
-                // 最后发送完整回答
-                const timer6 = setTimeout(() => {
-                    chrome.runtime.sendMessage({
-                        type: 'answer',
-                        answer,
-                        status: 'success'
-                    })
-                    // 清除定时器数组
-                    activeTimers = []
-                }, 6000)
-                activeTimers.push(timer6)
+        // 创建可中断的进程对象
+        let isAborted = false
+        currentAIProcess = {
+            abort: () => {
+                isAborted = true
             }
-        })
+        }
 
-        // 立即返回一个响应表示处理开始
+        // 立即返回响应表示处理开始
         sendResponse({
             type: 'started',
-            message: '思考过程已开始',
+            content: '开始处理...',
             status: 'processing'
         })
+
+        // 使用流式 API 调用
+        let fullContent = ''
+        await aiClient.sendMessageStream(
+            messages,
+            (chunk: string) => {
+                if (isAborted) return
+                
+                // 累积内容
+                fullContent += chunk
+                
+                // 发送流式内容
+                chrome.runtime.sendMessage({
+                    type: 'streaming_content',
+                    content: chunk
+                })
+            },
+            () => {
+                if (isAborted) return
+                
+                // 流式传输完成，发送完整内容作为最终答案
+                chrome.runtime.sendMessage({
+                    type: 'answer',
+                    answer: fullContent,
+                    status: 'success'
+                })
+                currentAIProcess = null
+            },
+            (error: Error) => {
+                if (isAborted) return
+                
+                console.error('豆包 AI API 调用失败:', error)
+                chrome.runtime.sendMessage({
+                    type: 'error',
+                    error: `豆包 AI 调用失败: ${error.message}`,
+                    status: 'error'
+                })
+                currentAIProcess = null
+            }
+        )
     } catch (error) {
         console.error('处理问题失败: ', error)
         sendResponse({ 
@@ -114,6 +130,7 @@ async function handleQuestion(question: string, sendResponse: (response: any) =>
             error: '处理请求时发生错误: ' + (error as Error).message,
             status: 'error'
         })
+        currentAIProcess = null
     }
 }
 
@@ -136,6 +153,53 @@ async function handleTabInfo(tabId: number | undefined, sendResponse: (response:
     }
 }
 
+// 处理设置API密钥
+async function handleSetApiKey(apiKey: string, sendResponse: (response: any) => void) {
+    try {
+        if (!apiKey || apiKey.trim().length === 0) {
+            throw new Error('API 密钥不能为空');
+        }
+        
+        await saveApiKey(apiKey.trim())
+        console.log('API 密钥已保存')
+        sendResponse({
+            type: 'success',
+            message: 'API 密钥保存成功',
+            status: 'success'
+        })
+    } catch (error) {
+        console.error('保存 API 密钥失败: ', error)
+        sendResponse({
+            type: 'error',
+            error: '保存 API 密钥失败: ' + (error as Error).message,
+            status: 'error'
+        })
+    }
+}
+
+// 处理获取 API 密钥
+async function handleGetApiKey(sendResponse: (response: any) => void) {
+    try {
+        const apiKey = await getApiKeyFromStorage()
+        const hasKey = apiKey && apiKey.length > 0
+        sendResponse({
+            type: 'success',
+            configured: hasKey,
+            apiKey: hasKey ? apiKey : null,
+            status: 'success'
+        })
+    } catch (error) {
+        console.error('获取 API 密钥状态失败: ', error)
+        sendResponse({
+            type: 'error',
+            error: '获取 API 密钥状态失败: ' + (error as Error).message,
+            status: 'error',
+            configured: false,
+            apiKey: null
+        })
+    }
+}
+
 // 处理终止请求
 function handleTerminate(sendResponse: (response: any) => void) {
     try {
@@ -143,6 +207,12 @@ function handleTerminate(sendResponse: (response: any) => void) {
         activeTimers.forEach(timer => {
             clearTimeout(timer)
         })
+        
+        // 中断当前 AI 进程
+        if (currentAIProcess) {
+            currentAIProcess.abort()
+            currentAIProcess = null
+        }
         
         // 清空定时器数组
         activeTimers = []

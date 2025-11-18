@@ -1,13 +1,20 @@
 <template>
     <div class="ai-assistant">
-        <!-- 复制成功提示popup -->
-        <div v-if="showCopyPopup" class="copy-popup">
+        <!-- 复制成功提示 -->
+        <div v-if="showCopyPopup" class="popup">
             {{ copyPopupMessage }}
         </div>
         
         <header class="assistant-header">
-            <h2>AI 开发者助手</h2>
-            <p>分析 DOM、CSS、网络请求，获取优化建议</p>
+            <div class="header-content">
+                <div class="header-text">
+                    <h2>AI 开发者助手</h2>
+                    <p>分析 DOM、CSS、网络请求，获取优化建议</p>
+                </div>
+                <button class="settings-button" @click="openApiKeySettings" title="设置">
+            <img src="/icons/setting.png" alt="设置" class="settings-icon" />
+          </button>
+            </div>
         </header>
     
         <main class="assistant-main">
@@ -75,11 +82,50 @@
                     <button @click="handleButtonClick" :disabled="!inputText.trim() && !isSending" class="send-button" :class="{ 'terminate-button': isSending }">
                         <img :src="isSending ? '/icons/stop_thinking.png' : '/icons/send_message.png'" :alt="isSending ? '终止' : '发送'" class="send-icon" />
                         <span>{{ isSending ? '终止' : '发送' }}</span>
-                        <!-- Debug: {{ isSending }} -->
                     </button>
                 </div>
             </div>
         </main>
+        
+        <!-- API 密钥设置模态框 -->
+        <div v-if="showApiKeySettings || isClosingModal" class="settings-modal" 
+             :class="{ 'modal-closing': isClosingModal }"
+             @mousedown="onModalMouseDown"
+             @mouseup="onModalMouseUp">
+            <div class="settings-content" :class="{ 'content-closing': isClosingModal }">
+                <div class="settings-header">
+                    <h3>API 密钥设置</h3>
+                    <button class="close-button" @mousedown="onCloseButtonClick">×</button>
+                </div>
+                <div class="settings-body">
+                    <div class="api-key-section">
+                        <label for="apiKey">豆包 AI API 密钥:</label>
+                        <div class="input-group">
+                            <input 
+                                id="apiKey"
+                                v-model="apiKeyInput" 
+                                type="password" 
+                                placeholder="请输入您的豆包 AI API 密钥"
+                                class="api-key-input"
+                                :class="{ 'has-value': apiKeyInput.length > 0 }"
+                            />
+                            <button class="toggle-visibility" @click="toggleApiKeyVisibility" :title="showApiKey ? '隐藏密钥' : '显示密钥'">
+                                <img 
+                                :src="showApiKey ? '/icons/eye_visible.png' : '/icons/eye_invisible.png'" 
+                                alt="切换显示" 
+                                class="toggle-icon" 
+                                />
+                            </button>
+                        </div>
+                    </div>
+                    <div class="settings-actions">
+                        <button class="save-button" @click="saveApiKey" :disabled="!apiKeyInput.trim()">
+                            保存密钥
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </template>
 
@@ -111,6 +157,14 @@ const isSending = ref(false)
 const showCopyPopup = ref(false)
 const copyPopupMessage = ref('')
 
+// API 密钥设置相关
+const showApiKeySettings = ref(false)
+const apiKeyInput = ref('')
+const showApiKey = ref(false)
+const isApiKeyConfigured = ref(false)
+const isClosingModal = ref(false)
+const mouseDownTarget = ref<EventTarget | null>(null)
+
 const handleButtonClick = () => {
     if (isSending.value) {
         terminateMessage()
@@ -124,7 +178,7 @@ const sendMessage = async () => {
     
     isSending.value = true
     
-    // 添加一个小延迟确保UI更新
+    // 添加一个小延迟确保 UI 更新
     await new Promise(resolve => setTimeout(resolve, 100))
     
     const userMessage: Message = {
@@ -193,11 +247,16 @@ const handleBackgroundResponse = (response: any) => {
             }
             break
             
+        case 'streaming_content':
+            break
+            
+        case 'streaming_complete':
         case 'answer':
-            // 显示最终回答
-            if (response.answer) {
-                window.finishThinkingProcess()
-                window.addMessage('assistant', response.answer, 'success')
+            // 流式完成或直接回答，显示最终结果
+            window.finishThinkingProcess()
+            if (response.answer || response.content) {
+                const finalAnswer = response.answer || response.content
+                window.addMessage('assistant', finalAnswer, 'success')
             }
             isSending.value = false
             break
@@ -212,17 +271,18 @@ const handleBackgroundResponse = (response: any) => {
             break
             
         case 'started':
-            // 处理开始响应，显示加载状态
-            console.log('思考过程已开始')
+            // 处理开始响应
             break
             
         default:
-            // 兼容旧格式
-            if (response.answer) {
-                window.addMessage('assistant', response.answer, 'success')
-            } else if (response.error) {
-                window.addMessage('assistant', response.error, 'error')
+            // 兼容旧格式，统一处理
+            const content = response.answer || response.content || response.error
+            if (content) {
+                const status = response.error ? 'error' : 'success'
+                window.addMessage('assistant', content, status)
             } else {
+                // 记录未知响应格式，便于调试
+                console.warn('收到未知格式的响应:', response)
                 window.addMessage('assistant', '收到未知格式的响应', 'error')
             }
             isSending.value = false
@@ -244,34 +304,29 @@ const copyToClipboard = async (content: string) => {
         showCopyPopupMessage('内容已复制到剪贴板')
     } catch (error) {
         console.error('复制失败: ', error)
-        // 降级方案：使用传统的复制方法
-        try {
-            const textArea = document.createElement('textarea')
-            textArea.value = content
-            document.body.appendChild(textArea)
-            textArea.select()
-            document.execCommand('copy')
-            document.body.removeChild(textArea)
-            showCopyPopupMessage('内容已复制到剪贴板')
-        } catch (fallbackError) {
-            console.error('降级复制方案也失败: ', fallbackError)
-            showCopyPopupMessage('复制失败，请手动复制')
-        }
     }
 }
 
-// 显示复制提示popup
+// 显示复制提示
 const showCopyPopupMessage = (message: string) => {
     copyPopupMessage.value = message
     showCopyPopup.value = true
     
-    // 3秒后自动隐藏
     setTimeout(() => {
-        showCopyPopup.value = false
-    }, 3000)
+        const popupElement = document.querySelector('.popup') as HTMLElement
+        if (popupElement) {
+            popupElement.classList.add('hiding')
+            
+            setTimeout(() => {
+                showCopyPopup.value = false
+                copyPopupMessage.value = ''
+            }, 400)
+        } else {
+            showCopyPopup.value = false
+            copyPopupMessage.value = ''
+        }
+    }, 2500)
 }
-
-
 
 // 判断思考是否完成
 const isThinkingComplete = (message: Message): boolean => {
@@ -412,6 +467,131 @@ watch(messages, (newMessages) => {
     }
 })
 
+// API 密钥相关方法
+const toggleApiKeyVisibility = () => {
+    showApiKey.value = !showApiKey.value
+    const input = document.getElementById('apiKey') as HTMLInputElement
+    if (input) {
+        input.type = showApiKey.value ? 'text' : 'password'
+    }
+}
+
+const loadApiKeyToInput = async () => {
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: 'GET_API_KEY'
+        })
+        
+        console.log('加载 API 密钥响应:', response)
+        
+        if (response && response.status === 'success' && response.apiKey) {
+            apiKeyInput.value = response.apiKey
+            console.log('API 密钥已成功填入输入框，长度: ', response.apiKey.length)
+        } else {
+            console.log('未找到已保存的 API 密钥')
+        }
+    } catch (error) {
+        console.error('加载 API 密钥失败: ', error)
+    }
+}
+
+const openApiKeySettings = async () => {
+    showApiKeySettings.value = true
+    // 等待 DOM 更新后再加载密钥
+    await nextTick()
+    await loadApiKeyToInput()
+}
+
+// 模态框关闭处理方法
+const onModalMouseDown = (event: MouseEvent) => {
+    mouseDownTarget.value = event.target
+}
+
+const onModalMouseUp = (event: MouseEvent) => {
+    // 检查鼠标按下和松开的目标是否相同，且是模态框背景
+    if (mouseDownTarget.value === event.currentTarget && 
+        event.target === event.currentTarget) {
+        closeModalWithAnimation()
+    }
+    mouseDownTarget.value = null
+}
+
+const onCloseButtonClick = (event: MouseEvent) => {
+    event.stopPropagation()
+    closeModalWithAnimation()
+}
+
+const closeModalWithAnimation = () => {
+    isClosingModal.value = true
+    setTimeout(() => {
+        showApiKeySettings.value = false
+        isClosingModal.value = false
+        apiKeyInput.value = ''
+    }, 300)
+}
+
+const saveApiKey = async () => {
+    if (!apiKeyInput.value || apiKeyInput.value.trim().length === 0) {
+        showCopyPopupMessage('请输入有效的 API 密钥')
+        return
+    }
+
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: 'SET_API_KEY',
+            apiKey: apiKeyInput.value.trim()
+        })
+        
+        console.log('保存 API 密钥响应:', response)
+        
+        // 检查响应状态
+        if (response && response.status === 'success') {
+            showCopyPopupMessage('API 密钥保存成功')
+            checkApiKeyStatus()
+        } else {
+            // 显示具体的错误信息
+            const errorMessage = response?.error || '未知错误'
+            showCopyPopupMessage(`保存失败: ${errorMessage}`)
+            console.error('保存失败详情:', response)
+        }
+    } catch (error) {
+        console.error('保存 API 密钥失败: ', error)
+        showCopyPopupMessage('保存失败，请重试')
+    }
+}
+
+const checkApiKeyStatus = async () => {
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: 'GET_API_KEY'
+        })
+        
+        console.log('检查 API 密钥状态响应:', response)
+        
+        // 检查响应状态和字段
+        if (response && response.status === 'success') {
+            const newStatus = response.configured || false
+            // 如果状态发生变化，显示提示
+            if (isApiKeyConfigured.value !== newStatus) {
+                isApiKeyConfigured.value = newStatus
+            } else {
+                isApiKeyConfigured.value = newStatus
+            }
+            
+            // 如果有 API 密钥且设置界面打开，自动填入
+            if (response.apiKey && showApiKeySettings.value) {
+                apiKeyInput.value = response.apiKey
+            }
+        } else {
+            console.warn('检查 API 密钥状态失败:', response)
+            isApiKeyConfigured.value = false
+        }
+    } catch (error) {
+        console.error('检查 API 密钥状态失败: ', error)
+        isApiKeyConfigured.value = false
+    }
+}
+
 onMounted(() => {
     window.addMessage('assistant', 
         '你好！我是 AI 开发者助手，可以帮你分析页面 DOM 结构、CSS 样式、网络请求等。有什么问题尽管问我！',
@@ -421,6 +601,7 @@ onMounted(() => {
         handleBackgroundResponse(message)
     })
 
+    checkApiKeyStatus()
     scrollToBottom()
 })
 </script>
@@ -441,16 +622,45 @@ onMounted(() => {
     flex-shrink: 0;
 }
 
-.assistant-header h2 {
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.header-text h2 {
     margin: 0 0 4px 0;
     font-size: 16px;
     font-weight: 600;
 }
 
-.assistant-header p {
+.header-text p {
     margin: 0;
     font-size: 12px;
     opacity: 0.9;
+}
+
+.settings-button {
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.settings-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+}
+
+.settings-icon {
+    width: 24px;
+    height: 24px;
+    filter: brightness(0) invert(1);
 }
 
 .assistant-main {
@@ -603,20 +813,16 @@ onMounted(() => {
     margin-left: auto;
     margin-right: 0;
 }
-
 .message.user .copy-button:hover {
     background: rgba(255, 255, 255, 0.1);
 }
-
 .message.user .copy-icon {
     filter: brightness(0) invert(1);
     opacity: 1;
 }
-
 .message.user .copy-button:hover .copy-icon {
     filter: brightness(0) invert(1) brightness(1.2);
 }
-
 .message.assistant .copy-button {
     margin-right: auto;
     margin-left: -2px;
@@ -640,37 +846,68 @@ onMounted(() => {
     color: #666;
 }
 
-/* 复制成功提示popup */
-.copy-popup {
+/* 错误状态下的时间戳和复制按钮 */
+.message.assistant.status-error .message-time {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.message.assistant.status-error .copy-button:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.message.assistant.status-error .copy-icon {
+    filter: brightness(0) invert(1);
+    opacity: 0.9;
+}
+
+.message.assistant.status-error .copy-button:hover .copy-icon {
+    filter: brightness(0) invert(1) brightness(1.2);
+}
+
+.popup {
     position: fixed;
     top: 20px;
     left: 50%;
     transform: translateX(-50%);
-    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-    color: white;
+    background: white;
+    color: #333;
     padding: 12px 24px;
     border-radius: 25px;
     font-size: 14px;
     font-weight: 500;
-    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
     z-index: 1000;
     animation: popupSlideIn 0.3s ease-out;
-    transition: all 0.3s ease;
+    transition: all 0.4s ease;
+    border: 1px solid #e9ecef;
 }
 
-.copy-popup:hover {
+.popup:hover {
     transform: translateX(-50%) translateY(-2px);
-    box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+.popup.hiding {
+    animation: popupSlideOut 0.3s ease-out forwards;
 }
 
 @keyframes popupSlideIn {
     from {
         opacity: 0;
-        transform: translateX(-50%) translateY(-10px);
+        transform: translateX(-50%) translateY(-20px) scale(0.9);
     }
     to {
         opacity: 1;
-        transform: translateX(-50%) translateY(0);
+        transform: translateX(-50%) translateY(0) scale(1);
+    }
+}
+@keyframes popupSlideOut {
+    from {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0) scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-20px) scale(0.9);
     }
 }
 
@@ -711,7 +948,12 @@ onMounted(() => {
     background: #f8f9fa;
     margin-bottom: 4px;
 }
-
+.message-input::placeholder {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
 .message-input:focus {
     border-color: #007bff;
     box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
@@ -798,17 +1040,6 @@ onMounted(() => {
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
-@keyframes slideIn {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
 .messages {
     scrollbar-width: thin;
     scrollbar-color: #c1c1c1 #f1f1f1;
@@ -877,10 +1108,10 @@ onMounted(() => {
 }
 
 .new-step {
-    animation: slideInNewStep 0.3s ease-out;
+    animation: slideIn 0.3s ease-out;
 }
 
-@keyframes slideInNewStep {
+@keyframes slideIn {
     from {
         opacity: 0;
         transform: translateY(10px);
@@ -935,5 +1166,225 @@ onMounted(() => {
         opacity: 1;
         transform: scale(1);
     }
+}
+
+/* 设置模态框样式 */
+.settings-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.settings-modal:not(.modal-closing) {
+    animation: fadeIn 0.3s ease-out forwards;
+}
+
+.settings-modal.modal-closing {
+    animation: fadeOut 0.3s ease-in forwards;
+}
+
+@keyframes fadeIn {
+    from {
+        background: rgba(0, 0, 0, 0);
+    }
+    to {
+        background: rgba(0, 0, 0, 0.5);
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        background: rgba(0, 0, 0, 0.5);
+    }
+    to {
+        background: rgba(0, 0, 0, 0);
+    }
+}
+
+.settings-content {
+    background: white;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    overflow: hidden;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+.settings-content:not(.content-closing) {
+    animation: bounceIn 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+}
+.settings-content.content-closing {
+    animation: bounceOut 0.35s ease-in forwards;
+}
+
+@keyframes bounceIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes bounceOut {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+
+.settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid #e0e0e0;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+.settings-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.close-button {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background 0.2s ease;
+    line-height: 1;
+}
+.close-button:hover { background: rgba(255, 255, 255, 0.2); }
+
+.settings-body { padding: 24px; }
+.api-key-section { margin-bottom: 24px; }
+.api-key-section label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+}
+
+.input-group {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.api-key-input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.3s ease;
+    background: #f8f9fa;
+}
+
+.api-key-input:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+    background: white;
+}
+
+.toggle-visibility {
+    background: #f8f9fa;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.toggle-visibility:hover {
+    background: #e9ecef;
+    border-color: #dee2e6;
+}
+
+.toggle-icon {
+    width: 20px;
+    height: 20px;
+    filter: brightness(0) invert(0.5);
+}
+
+.settings-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.save-button {
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+    color: white;
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+    box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    flex-shrink: 0;
+    margin-top: 0;
+}
+
+.save-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 123, 255, 0.4);
+    background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
+}
+
+.save-button:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.save-button:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.save-button:disabled span {
+    color: rgba(255, 255, 255, 0.6);
+    text-shadow: none;
+}
+.save-button:not(:disabled) span {
+    transition: color 0.3s ease, text-shadow 0.3s ease;
+}
+.save-button:hover:not(:disabled) span {
+    color: #ffffff;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.save-button:active:not(:disabled) span {
+    color: #f0f0f0;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 </style>
