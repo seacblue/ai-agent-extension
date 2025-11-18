@@ -1,0 +1,44 @@
+{
+    "manifest_version": 3,
+    "name": "Web 前端智能开发者助手",
+    "version": "1.0.0",
+    "description": "AI 助手，帮助开发者分析页面结构、CSS 样式和网络请求",
+    
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    },
+
+    "permissions": [
+        "activeTab",
+        "storage",
+        "scripting"
+    ],
+
+    "host_permissions": [
+        "<all_urls>"
+    ],
+
+    "devtools_page": "devtools.html",
+
+    "background": {
+        "service_worker": "background.js",
+        "type": "module"
+    },
+
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"],
+            "js": ["content.js"],
+            "run_at": "document_end"
+        }
+    ],
+
+    "web_accessible_resources": [
+        {
+            "resources": ["assets/*"],
+            "matches": ["<all_urls>"]
+        }
+    ]
+}

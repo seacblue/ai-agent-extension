@@ -9,14 +9,46 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:extension": "vite build && shx cp manifest.json dist/ && shx cp -r public/icons/ dist/",
+    "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "vue": "^3.5.22"
+    "@pinia/nuxt": "^0.11.3",
+    "pinia": "^3.0.4",
+    "vue": "^3.5.24",
+    "vue-router": "^4.6.3"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/chrome": "^0.1.29",
+    "@types/node": "^24.10.1",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
     "@vitejs/plugin-vue": "^6.0.1",
-    "vite": "^7.1.11",
-    "vite-plugin-vue-devtools": "^8.0.3"
-  }
+    "@vue/tsconfig": "^0.8.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-vue": "^10.5.1",
+    "globals": "^16.5.0",
+    "shx": "^0.4.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vite": "^7.2.2",
+    "vite-plugin-vue-devtools": "^8.0.3",
+    "vue-tsc": "^3.1.4"
+  },
+  "description": "This template should help get you started developing with Vue 3 in Vite.",
+  "main": "vite.config.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seacblue/ai-agent-extension.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/seacblue/ai-agent-extension/issues"
+  },
+  "homepage": "https://github.com/seacblue/ai-agent-extension#readme"
 }
