@@ -59,7 +59,7 @@ npm run type-check
 
 ## 安装到浏览器
 
-### Chrome/Edge安装步骤
+### Chrome / Edge 安装步骤
 
 1. 运行 `npm run build:extension` 构建扩展
 2. 打开浏览器，进入扩展管理页面 (`chrome://extensions/`)

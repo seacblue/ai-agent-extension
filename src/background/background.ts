@@ -22,13 +22,84 @@ chrome.runtime.onConnect.addListener((port) => {
     }
 })
 
+// 处理来自 DevTools Panel 的问题
 async function handleQuestion(question: string, sendResponse: (response: any) => void) {
     try {
-        const answer = `这是对问题"${question}"的模拟回答。实际将调用 AI API。`
-        sendResponse({ answer })
+        // 模拟 AI 思考过程
+        const thinkingSteps = [
+            `分析用户问题: "${question}"`,
+            '制定回答策略和搜索方案',
+            '调用知识库搜索相关信息',
+            '整理搜索结果并形成结构化回答',
+            '优化回答内容，确保清晰易懂'
+        ]
+
+        // 生成最终回答
+        const answer = `这是对问题"${question}"的详细回答。经过分析后，我为您提供以下解决方案：\n1. 首先理解问题的核心需求\n2. 分析可能的解决方案\n3. 提供具体的实施建议\n4. 给出相关的注意事项\n\n希望这个回答对您有帮助！`
+
+        // 获取当前活动的 DevTools Panel
+        chrome.runtime.getContexts({ contextTypes: ['DEVELOPER_TOOLS'] }, (contexts) => {
+            if (contexts.length > 0) {
+                // 分步骤发送思考过程，模拟真实的思考延迟
+                setTimeout(() => {
+                    chrome.runtime.sendMessage({
+                        type: 'thinking',
+                        content: thinkingSteps[0]
+                    })
+                }, 500)
+
+                setTimeout(() => {
+                    chrome.runtime.sendMessage({
+                        type: 'thinking',
+                        content: thinkingSteps[1]
+                    })
+                }, 1500)
+
+                setTimeout(() => {
+                    chrome.runtime.sendMessage({
+                        type: 'thinking',
+                        content: thinkingSteps[2]
+                    })
+                }, 2500)
+
+                setTimeout(() => {
+                    chrome.runtime.sendMessage({
+                        type: 'thinking',
+                        content: thinkingSteps[3]
+                    })
+                }, 3500)
+
+                setTimeout(() => {
+                    chrome.runtime.sendMessage({
+                        type: 'thinking',
+                        content: thinkingSteps[4]
+                    })
+                }, 4500)
+
+                // 最后发送完整回答
+                setTimeout(() => {
+                    chrome.runtime.sendMessage({
+                        type: 'answer',
+                        answer,
+                        status: 'success'
+                    })
+                }, 6000)
+            }
+        })
+
+        // 立即返回一个响应表示处理开始
+        sendResponse({
+            type: 'started',
+            message: '思考过程已开始',
+            status: 'processing'
+        })
     } catch (error) {
         console.error('处理问题失败: ', error)
-        sendResponse({ error: '处理请求时发生错误' })
+        sendResponse({ 
+            type: 'error',
+            error: '处理请求时发生错误: ' + (error as Error).message,
+            status: 'error'
+        })
     }
 }
 

@@ -30,6 +30,32 @@ declare global {
       }
     }
   }
+
+  // 全局接口类型声明
+  interface Window {
+    addThinkingMessage: (content: string) => number
+    addMessage: (type: 'user' | 'assistant', content: string, status?: 'success' | 'error') => number
+    updateThinkingConfig: (newConfig: Partial<ThinkingConfig>) => void
+    getThinkingConfig: () => ThinkingConfig
+    finishThinkingProcess: () => void
+  }
+
+  interface ThinkingConfig {
+    enableThinkingMerge: boolean
+    mergeTimeWindow: number
+    maxMergeInterval: number
+    maxThinkingParts: number
+    enableProgressiveDisplay: boolean
+  }
+
+  interface Message {
+    id: number
+    type: 'user' | 'assistant' | 'thinking'
+    content: string
+    timestamp: string
+    status: 'success' | 'error'
+    completed?: boolean
+  }
 }
 
 export {}

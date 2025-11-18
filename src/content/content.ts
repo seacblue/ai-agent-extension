@@ -1,15 +1,12 @@
+import { createPageInfo, createPageAnalysis } from '../shared/utils'
+
 // 监听来自 DevTools Panel 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'GET_DOM') {
         const domContent = document.documentElement.outerHTML
         sendResponse({ dom: domContent })
     } else if (request.action === 'GET_PAGE_INFO') {
-        const pageInfo = {
-            title: document.title,
-            url: window.location.href,
-            userAgent: navigator.userAgent,
-            timestamp: new Date().toISOString()
-        }
+        const pageInfo = createPageInfo()
         sendResponse(pageInfo)
     }
     return true
@@ -20,18 +17,7 @@ const port = chrome.runtime.connect({ name: 'content-script' })
 
 // 定期分析页面并发送数据
 function analyzePage() {
-    const pageInfo = {
-        title: document.title,
-        url: window.location.href,
-        timestamp: new Date().toISOString(),
-        elements: {
-            total: document.querySelectorAll('*').length,
-            images: document.querySelectorAll('img').length,
-            links: document.querySelectorAll('a').length,
-            scripts: document.querySelectorAll('script').length,
-            styles: document.querySelectorAll('style, link[rel="stylesheet"]').length
-        }
-    }
+    const pageInfo = createPageAnalysis()
     
     // 发送页面信息到 Background Script
     port.postMessage({

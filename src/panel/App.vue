@@ -13,6 +13,7 @@
                             'message': true,
                             'user': message.type === 'user',
                             'assistant': message.type === 'assistant',
+                            'thinking': message.type === 'thinking',
                             'status-success': message.status === 'success',
                             'status-error': message.status === 'error'
                         }"
@@ -21,8 +22,32 @@
                         @click="onMessageClick(message.id)">
                         <div class="message-background"></div>
                         <div class="message-content-wrapper">
-                            <div class="message-content">{{ message.content }}</div>
-                            <div class="message-time">{{ message.timestamp }}</div>
+                            <!-- 普通消息内容 -->
+                            <div v-if="message.type !== 'thinking'" class="message-content">{{ message.content }}</div>
+                            
+                            <!-- 思考过程消息 -->
+                            <div v-else class="thinking-content">
+                                <div class="thinking-steps">
+                                    <div v-for="(step, index) in message.thinkingSteps" :key="step.id" 
+                                         class="thinking-step"
+                                         :class="{ 
+                                             'new-step': isNewStep(step.id),
+                                             'thinking-complete': isThinkingComplete(message) && index === message.thinkingSteps!.length - 1
+                                         }">
+                                        <div class="step-content">{{ step.content }}</div>
+                                    </div>
+                                </div>
+                                <div v-if="!isThinkingComplete(message)" class="thinking-progress">
+                                    <span>思考进行中</span>
+                                    <div class="progress-dots">
+                                        <div class="progress-dot"></div>
+                                        <div class="progress-dot"></div>
+                                        <div class="progress-dot"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div v-if="message.type !== 'thinking'" class="message-time">{{ message.timestamp }}</div>
                         </div>
                     </div>
                 </div>
@@ -46,28 +71,37 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, nextTick, watch } from 'vue'
+import { generateId, getCurrentTimestamp } from '../shared/utils'
 
 interface Message {
     id: number
-    type: 'user' | 'assistant'
+    type: 'user' | 'assistant' | 'thinking'
     content: string
     timestamp: string
     status: 'success' | 'error'
+    completed?: boolean
+    thinkingSteps?: ThinkingStep[]
+}
+
+interface ThinkingStep {
+    id: number
+    content: string
+    timestamp: string
 }
 
 const inputText = ref('')
 const messages = reactive<Message[]>([])
 const messagesRef = ref<HTMLElement>()
-const hoveredMessageId = ref<number | null>(null)
+const newStepIds = ref<Set<number>>(new Set())
 
 const sendMessage = async () => {
     if (!inputText.value.trim()) return
     
     const userMessage: Message = {
-        id: Date.now(),
+        id: generateId(),
         type: 'user',
         content: inputText.value,
-        timestamp: new Date().toLocaleTimeString(),
+        timestamp: getCurrentTimestamp(),
         status: 'success'
     }
     
@@ -85,42 +119,65 @@ const sendMessage = async () => {
             question
         })
         
-        const assistantMessage: Message = {
-            id: Date.now() + 1,
-            type: 'assistant',
-            content: response.answer,
-            timestamp: new Date().toLocaleTimeString(),
-            status: 'success'
-        }
+        // 处理响应
+        handleBackgroundResponse(response)
         
-        messages.push(assistantMessage)
     } catch (error) {
         console.error('发送消息失败: ', error)
         
-        // 根据错误类型提供具体的错误信息
         let errorContent = '抱歉，处理您的问题时遇到了错误，请稍后再试。'
-        if (error instanceof Error) {
-            if (error.message.includes('Extension context invalidated')) {
-                errorContent = '扩展上下文已失效，请刷新页面后重试。'
-            } else if (error.message.includes('Receiving end does not exist')) {
-                errorContent = '无法连接到后台服务，请确保扩展已正确加载。'
-            } else {
-                errorContent = `错误：${error.message}`
-            }
-        }
-        
-        const errorMessage: Message = {
-            id: Date.now() + 1,
-            type: 'assistant',
-            content: errorContent,
-            timestamp: new Date().toLocaleTimeString(),
-            status: 'error'
-        }
-        
-        messages.push(errorMessage)
+        window.addMessage('assistant', errorContent, 'error')
     }
     
     await scrollToBottom()
+}
+
+// 统一处理后台响应
+const handleBackgroundResponse = (response: any) => {
+    if (!response) {
+        window.addMessage('assistant', '未收到有效响应', 'error')
+        return
+    }
+
+    switch (response.type) {
+        case 'thinking':
+            // 显示思考过程
+            if (response.content) {
+                window.addThinkingMessage(response.content)
+            }
+            break
+            
+        case 'answer':
+            // 显示最终回答
+            if (response.answer) {
+                window.finishThinkingProcess()
+                window.addMessage('assistant', response.answer, 'success')
+            }
+            break
+        
+        case 'error':
+            // 显示错误信息
+            if (response.error) {
+                window.finishThinkingProcess()
+                window.addMessage('assistant', response.error, 'error')
+            }
+            break
+            
+        case 'started':
+            // 处理开始响应，显示加载状态
+            console.log('思考过程已开始')
+            break
+            
+        default:
+            // 兼容旧格式
+            if (response.answer) {
+                window.addMessage('assistant', response.answer, 'success')
+            } else if (response.error) {
+                window.addMessage('assistant', response.error, 'error')
+            } else {
+                window.addMessage('assistant', '收到未知格式的响应', 'error')
+            }
+    }
 }
 
 // 滚动到底部函数
@@ -131,41 +188,162 @@ const scrollToBottom = async () => {
     }
 }
 
-// 消息悬停效果
-const onMessageHover = (messageId: number, isHovering: boolean) => {
-    hoveredMessageId.value = isHovering ? messageId : null
+
+
+// 判断思考是否完成
+const isThinkingComplete = (message: Message): boolean => {
+    return message.completed === true
 }
 
-// 消息点击效果
+// 判断是否为新步骤
+const isNewStep = (stepId: number): boolean => {
+    return newStepIds.value.has(stepId)
+}
+
+// 消息悬停处理
+const onMessageHover = (messageId: number, isHovering: boolean) => {
+    // 可以在这里添加悬停效果逻辑
+    console.log(`Message ${messageId} hover: ${isHovering}`)
+}
+
+// 消息点击处理
 const onMessageClick = (messageId: number) => {
-    const message = messages.find(m => m.id === messageId)
-    if (message) {
-        console.log('点击消息: ', message.content)
-        // Do something
+    // 可以在这里添加点击效果逻辑
+    console.log(`Message ${messageId} clicked`)
+}
+
+// 创建思考消息
+const createThinkingMessage = (content: string): Message => {
+    const stepId = generateId()
+    const thinkingStep: ThinkingStep = {
+        id: stepId,
+        content,
+        timestamp: getCurrentTimestamp()
+    }
+    
+    return {
+        id: generateId(),
+        type: 'thinking',
+        content: '',
+        timestamp: getCurrentTimestamp(),
+        status: 'success',
+        thinkingSteps: [thinkingStep]
     }
 }
 
-// 监听消息变化，自动滚动到底部
-watch(messages, () => {
-    scrollToBottom()
+// 配置选项
+const config = {
+    enableThinkingMerge: true, // 启用思考过程自动合并
+    enableProgressiveDisplay: true // 启用渐进式显示
+}
+
+const shouldMergeThinking = (): boolean => {
+    // 如果没有消息，不能合并
+    if (messages.length === 0) return false
+    
+    // 检查最后一个消息是否为未完成的 thinking 消息
+    const lastMessage = messages[messages.length - 1]
+    return lastMessage.type === 'thinking' && lastMessage.completed !== true
+}
+
+window.addThinkingMessage = (content: string) => {
+    const stepId = generateId()
+    const newStep: ThinkingStep = {
+        id: stepId,
+        content,
+        timestamp: getCurrentTimestamp()
+    }
+    
+    if (shouldMergeThinking() || !config.enableThinkingMerge) {
+        const lastThinking = messages[messages.length - 1]
+        if (!lastThinking.thinkingSteps) {
+            lastThinking.thinkingSteps = []
+        }
+        
+        // 添加新步骤到现有思考消息
+        lastThinking.thinkingSteps.push(newStep)
+        newStepIds.value.add(stepId)
+        nextTick(() => {
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    newStepIds.value.delete(stepId)
+                }, 300)
+            })
+        })
+        
+        return lastThinking.id
+    }
+    
+    // 创建新的思考消息
+    const thinkingMessage = createThinkingMessage(content)
+    messages.push(thinkingMessage)
+    newStepIds.value.add(stepId)
+    nextTick(() => {
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                newStepIds.value.delete(stepId)
+            }, 300)
+        })
+    })
+    
+    return thinkingMessage.id
+}
+
+window.finishThinkingProcess = () => {
+    if (messages.length === 0) return
+    
+    const lastMessage = messages[messages.length - 1]
+    if (lastMessage.type === 'thinking' && lastMessage.completed !== true) {
+        lastMessage.completed = true
+    }
+}
+
+window.updateThinkingConfig = (newConfig: Partial<typeof config>) => {
+    Object.assign(config, newConfig)
+}
+
+window.addMessage = (type: 'user' | 'assistant', content: string, status: 'success' | 'error' = 'success') => {
+    const message: Message = {
+        id: generateId(),
+        type,
+        content,
+        timestamp: getCurrentTimestamp(),
+        status
+    }
+    messages.push(message)
+    
+    // 只对 assistant 消息自动滚动
+    if (type === 'assistant') {
+        scrollToBottom()
+    }
+    
+    return message.id
+}
+
+watch(messages, (newMessages) => {
+    if (newMessages.length > 0) {
+        const latestMessage = newMessages[newMessages.length - 1]
+        if (latestMessage.type === 'assistant') {
+            scrollToBottom()
+        }
+    }
 })
 
 onMounted(() => {
-    // 欢迎消息
-    messages.push({
-        id: 1,
-        type: 'assistant',
-        content: '你好！我是 AI 开发者助手，可以帮你分析页面 DOM 结构、CSS 样式、网络请求等。有什么问题尽管问我！',
-        timestamp: new Date().toLocaleTimeString(),
-        status: 'success'
+    window.addMessage('assistant', 
+        '你好！我是 AI 开发者助手，可以帮你分析页面 DOM 结构、CSS 样式、网络请求等。有什么问题尽管问我！',
+        'success')
+
+    chrome.runtime.onMessage.addListener((message) => {
+        handleBackgroundResponse(message)
     })
 
-    // 初始滚动到底部
     scrollToBottom()
 })
 </script>
 
 <style scoped>
+
 .ai-assistant {
     height: 100vh;
     display: flex;
@@ -265,7 +443,10 @@ onMounted(() => {
 .message.user:hover {
     box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
 }
-.message.user:hover .message-background { filter: brightness(0.85); }
+.message.user:hover,
+.message.user:hover .message-background {
+    filter: brightness(0.85);
+}
 
 /* AI 助手消息基础样式 */
 .message.assistant { margin-right: auto; }
@@ -279,17 +460,22 @@ onMounted(() => {
 .message.assistant.status-error .message-background {
     background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
 }
-.message.assistant.status-error:hover .message-background { filter: brightness(0.85); }
+.message.assistant.status-error:hover,
+.message.assistant.status-error:hover .message-background {
+    filter: brightness(0.85);
+}
 
 /* 消息内容 */
 .message-content {
     margin-bottom: 6px;
     line-height: 1.4;
     word-wrap: break-word;
+    font-size: 15px;
+    white-space: pre-line;
 }
 
 .message-time {
-    font-size: 10px;
+    font-size: 12px;
     opacity: 0.8;
     font-weight: 500;
 }
@@ -360,7 +546,6 @@ onMounted(() => {
     box-shadow: 0 6px 20px rgba(0, 123, 255, 0.4);
     background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
 }
-
 .send-button:hover:not(:disabled) .send-icon {
     filter: brightness(0) invert(1) drop-shadow(0 0 2px rgba(255, 255, 255, 0.5));
 }
@@ -368,7 +553,6 @@ onMounted(() => {
 .send-button:active:not(:disabled) {
     transform: translateY(0);
 }
-
 .send-button:active:not(:disabled) .send-icon {
     filter: brightness(0) invert(1) drop-shadow(0 0 4px rgba(255, 255, 255, 0.8));
 }
@@ -380,7 +564,6 @@ onMounted(() => {
     transform: none;
     transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
-
 .send-button:disabled .send-icon {
     filter: brightness(0) invert(0.7) grayscale(0.8);
     opacity: 0.8;
@@ -390,16 +573,13 @@ onMounted(() => {
     color: rgba(255, 255, 255, 0.6);
     text-shadow: none;
 }
-
 .send-button:not(:disabled) span {
     transition: color 0.3s ease, text-shadow 0.3s ease;
 }
-
 .send-button:hover:not(:disabled) span {
     color: #ffffff;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
-
 .send-button:active:not(:disabled) span {
     color: #f0f0f0;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
@@ -416,18 +596,131 @@ onMounted(() => {
     }
 }
 
-.messages::-webkit-scrollbar {
-    width: 6px;
+.messages {
+    scrollbar-width: thin;
+    scrollbar-color: #c1c1c1 #f1f1f1;
 }
-.messages::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 3px;
+
+/* 思考状态 */
+.message.thinking {
+    color: #333;
+    margin-right: auto;
+    padding: 12px 16px;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    cursor: default;
+    transition: none;
+    transform: none;
+    width: 100%;
+    margin-bottom: 0;
 }
-.messages::-webkit-scrollbar-thumb {
-    background: #c1c1c1;
-    border-radius: 3px;
+
+.message.thinking .message-background {
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
 }
-.messages::-webkit-scrollbar-thumb:hover {
-    background: #a8a8a8;
+
+.message.thinking:hover,
+.message.thinking:hover .message-background {
+    transform: none;
+    box-shadow: none;
+    filter: none;
+}
+.message.thinking:active { transform: none; }
+
+/* 思考内容样式 */
+.thinking-content {
+    width: 100%;
+    color: #9ca3af;
+    font-size: 13px;
+    line-height: 2.2;
+    transition: all 0.3s ease;
+}
+
+/* 思考步骤样式 */
+.thinking-steps {
+    position: relative;
+    padding-left: 0;
+    transition: all 0.3s ease;
+}
+
+.thinking-step {
+    position: relative;
+    margin-bottom: -4px;
+    opacity: 1;
+    transform: translateY(0);
+    transition: all 0.3s ease;
+    max-height: 200px;
+    overflow: hidden;
+}
+
+.step-content {
+    font-size: 13px;
+    white-space: pre-line;
+    word-wrap: break-word;
+    transform: translateY(-4px);
+}
+
+.new-step {
+    animation: slideInNewStep 0.3s ease-out;
+}
+
+@keyframes slideInNewStep {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 思考进度指示器 */
+.thinking-progress {
+    margin-top: 8px;
+    margin-left: -8px;
+    padding: 4px 0 4px 8px;
+    background-color: #f9fafb;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #9ca3af;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.progress-dots {
+    display: flex;
+    gap: 2px;
+}
+
+.progress-dot {
+    width: 4px;
+    height: 4px;
+    background-color: #e5e7eb;
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+}
+
+.progress-dot:nth-child(2) {
+    animation-delay: 0.3s;
+}
+
+.progress-dot:nth-child(3) {
+    animation-delay: 0.6s;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 0.3;
+        transform: scale(0.8);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 </style>
