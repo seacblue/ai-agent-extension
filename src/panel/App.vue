@@ -1,5 +1,10 @@
 <template>
     <div class="ai-assistant">
+        <!-- 复制成功提示popup -->
+        <div v-if="showCopyPopup" class="copy-popup">
+            {{ copyPopupMessage }}
+        </div>
+        
         <header class="assistant-header">
             <h2>AI 开发者助手</h2>
             <p>分析 DOM、CSS、网络请求，获取优化建议</p>
@@ -47,7 +52,13 @@
                                 </div>
                             </div>
                             
-                            <div v-if="message.type !== 'thinking'" class="message-time">{{ message.timestamp }}</div>
+                            <div v-if="message.type !== 'thinking'" class="message-footer">
+                                <div v-if="message.type === 'user'" class="message-time">{{ message.timestamp }}</div>
+                                <button class="copy-button" @click="copyToClipboard(message.content)" :title="'复制'">
+                                    <img src="/icons/copy.png" alt="复制" class="copy-icon" />
+                                </button>
+                                <div v-if="message.type === 'assistant'" class="message-time">{{ message.timestamp }}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -97,6 +108,8 @@ const messages = reactive<Message[]>([])
 const messagesRef = ref<HTMLElement>()
 const newStepIds = ref<Set<number>>(new Set())
 const isSending = ref(false)
+const showCopyPopup = ref(false)
+const copyPopupMessage = ref('')
 
 const handleButtonClick = () => {
     if (isSending.value) {
@@ -222,6 +235,40 @@ const scrollToBottom = async () => {
     if (messagesRef.value) {
         messagesRef.value.scrollTop = messagesRef.value.scrollHeight
     }
+}
+
+// 复制到剪贴板功能
+const copyToClipboard = async (content: string) => {
+    try {
+        await navigator.clipboard.writeText(content)
+        showCopyPopupMessage('内容已复制到剪贴板')
+    } catch (error) {
+        console.error('复制失败: ', error)
+        // 降级方案：使用传统的复制方法
+        try {
+            const textArea = document.createElement('textarea')
+            textArea.value = content
+            document.body.appendChild(textArea)
+            textArea.select()
+            document.execCommand('copy')
+            document.body.removeChild(textArea)
+            showCopyPopupMessage('内容已复制到剪贴板')
+        } catch (fallbackError) {
+            console.error('降级复制方案也失败: ', fallbackError)
+            showCopyPopupMessage('复制失败，请手动复制')
+        }
+    }
+}
+
+// 显示复制提示popup
+const showCopyPopupMessage = (message: string) => {
+    copyPopupMessage.value = message
+    showCopyPopup.value = true
+    
+    // 3秒后自动隐藏
+    setTimeout(() => {
+        showCopyPopup.value = false
+    }, 3000)
 }
 
 
@@ -510,10 +557,121 @@ onMounted(() => {
     white-space: pre-line;
 }
 
+/* 消息底部容器 - 更紧凑 */
+.message-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+    gap: 8px;
+}
+
+/* 复制按钮样式 */
+.copy-button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.copy-button:hover {
+    background-color: rgba(200, 200, 200, 0.3);
+}
+
+.copy-button:hover .copy-icon {
+    filter: brightness(0.7);
+}
+
+.copy-icon {
+    width: 14px;
+    height: 14px;
+    transition: filter 0.2s ease;
+    opacity: 0.7;
+}
+
+/* 用户消息的复制按钮 */
+.message.user .copy-button {
+    background: none;
+    margin-left: auto;
+    margin-right: 0;
+}
+
+.message.user .copy-button:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.message.user .copy-icon {
+    filter: brightness(0) invert(1);
+    opacity: 1;
+}
+
+.message.user .copy-button:hover .copy-icon {
+    filter: brightness(0) invert(1) brightness(1.2);
+}
+
+.message.assistant .copy-button {
+    margin-right: auto;
+    margin-left: -2px;
+}
+
+/* 时间戳样式 */
 .message-time {
-    font-size: 12px;
+    font-size: 11px;
     opacity: 0.8;
     font-weight: 500;
+    color: inherit;
+}
+
+/* 用户消息的时间戳 */
+.message.user .message-time {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* 助手消息的时间戳 */
+.message.assistant .message-time {
+    color: #666;
+}
+
+/* 复制成功提示popup */
+.copy-popup {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 25px;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+    z-index: 1000;
+    animation: popupSlideIn 0.3s ease-out;
+    transition: all 0.3s ease;
+}
+
+.copy-popup:hover {
+    transform: translateX(-50%) translateY(-2px);
+    box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+}
+
+@keyframes popupSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
 }
 
 .message-status {
