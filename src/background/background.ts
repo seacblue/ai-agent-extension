@@ -1,3 +1,6 @@
+// 存储当前活跃的定时器
+let activeTimers: NodeJS.Timeout[] = []
+
 // 监听来自 DevTools Panel 和 Content Script 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'ASK_QUESTION') {
@@ -5,6 +8,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true
     } else if (request.type === 'GET_TAB_INFO') {
         handleTabInfo(sender.tab?.id, sendResponse)
+        return true
+    } else if (request.type === 'TERMINATE_PROCESS') {
+        handleTerminate(sendResponse)
         return true
     }
 })
@@ -41,49 +47,57 @@ async function handleQuestion(question: string, sendResponse: (response: any) =>
         chrome.runtime.getContexts({ contextTypes: ['DEVELOPER_TOOLS'] }, (contexts) => {
             if (contexts.length > 0) {
                 // 分步骤发送思考过程，模拟真实的思考延迟
-                setTimeout(() => {
+                const timer1 = setTimeout(() => {
                     chrome.runtime.sendMessage({
                         type: 'thinking',
                         content: thinkingSteps[0]
                     })
                 }, 500)
+                activeTimers.push(timer1)
 
-                setTimeout(() => {
+                const timer2 = setTimeout(() => {
                     chrome.runtime.sendMessage({
                         type: 'thinking',
                         content: thinkingSteps[1]
                     })
                 }, 1500)
+                activeTimers.push(timer2)
 
-                setTimeout(() => {
+                const timer3 = setTimeout(() => {
                     chrome.runtime.sendMessage({
                         type: 'thinking',
                         content: thinkingSteps[2]
                     })
                 }, 2500)
+                activeTimers.push(timer3)
 
-                setTimeout(() => {
+                const timer4 = setTimeout(() => {
                     chrome.runtime.sendMessage({
                         type: 'thinking',
                         content: thinkingSteps[3]
                     })
                 }, 3500)
+                activeTimers.push(timer4)
 
-                setTimeout(() => {
+                const timer5 = setTimeout(() => {
                     chrome.runtime.sendMessage({
                         type: 'thinking',
                         content: thinkingSteps[4]
                     })
                 }, 4500)
+                activeTimers.push(timer5)
 
                 // 最后发送完整回答
-                setTimeout(() => {
+                const timer6 = setTimeout(() => {
                     chrome.runtime.sendMessage({
                         type: 'answer',
                         answer,
                         status: 'success'
                     })
+                    // 清除定时器数组
+                    activeTimers = []
                 }, 6000)
+                activeTimers.push(timer6)
             }
         })
 
@@ -119,5 +133,31 @@ async function handleTabInfo(tabId: number | undefined, sendResponse: (response:
     } catch (error) {
         console.error('获取标签页信息失败: ', error)
         sendResponse({ error: '获取标签页信息失败' })
+    }
+}
+
+// 处理终止请求
+function handleTerminate(sendResponse: (response: any) => void) {
+    try {
+        // 清除所有活跃的定时器
+        activeTimers.forEach(timer => {
+            clearTimeout(timer)
+        })
+        
+        // 清空定时器数组
+        activeTimers = []
+        
+        sendResponse({
+            type: 'terminated',
+            message: '所有任务已终止',
+            status: 'success'
+        })
+    } catch (error) {
+        console.error('处理终止请求失败: ', error)
+        sendResponse({
+            type: 'error',
+            error: '终止任务失败: ' + (error as Error).message,
+            status: 'error'
+        })
     }
 }

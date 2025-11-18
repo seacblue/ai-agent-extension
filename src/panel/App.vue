@@ -53,15 +53,18 @@
                 </div>
         
                 <div class="input-area">
-                    <input 
-                        v-model="inputText" 
-                        @keyup.enter="sendMessage"
-                        placeholder="输入问题，如：分析页面 DOM 结构..."
-                        class="message-input"
-                    />
-                    <button @click="sendMessage" :disabled="!inputText.trim()" class="send-button">
-                        <img src="/icons/send_message.png" alt="发送" class="send-icon" />
-                        <span>发送</span>
+                    <div class="input-wrapper">
+                        <input 
+                            v-model="inputText" 
+                            @keyup.enter="sendMessage"
+                            placeholder="输入问题，如：分析页面 DOM 结构..."
+                            class="message-input"
+                        />
+                    </div>
+                    <button @click="handleButtonClick" :disabled="!inputText.trim() && !isSending" class="send-button" :class="{ 'terminate-button': isSending }">
+                        <img :src="isSending ? '/icons/stop_thinking.png' : '/icons/send_message.png'" :alt="isSending ? '终止' : '发送'" class="send-icon" />
+                        <span>{{ isSending ? '终止' : '发送' }}</span>
+                        <!-- Debug: {{ isSending }} -->
                     </button>
                 </div>
             </div>
@@ -93,9 +96,23 @@ const inputText = ref('')
 const messages = reactive<Message[]>([])
 const messagesRef = ref<HTMLElement>()
 const newStepIds = ref<Set<number>>(new Set())
+const isSending = ref(false)
+
+const handleButtonClick = () => {
+    if (isSending.value) {
+        terminateMessage()
+    } else {
+        sendMessage()
+    }
+}
 
 const sendMessage = async () => {
     if (!inputText.value.trim()) return
+    
+    isSending.value = true
+    
+    // 添加一个小延迟确保UI更新
+    await new Promise(resolve => setTimeout(resolve, 100))
     
     const userMessage: Message = {
         id: generateId(),
@@ -127,15 +144,31 @@ const sendMessage = async () => {
         
         let errorContent = '抱歉，处理您的问题时遇到了错误，请稍后再试。'
         window.addMessage('assistant', errorContent, 'error')
+        isSending.value = false
     }
     
     await scrollToBottom()
+}
+
+const terminateMessage = async () => {
+    isSending.value = false
+    window.finishThinkingProcess()
+    
+    // 向 Background 发送终止消息
+    try {
+        await chrome.runtime.sendMessage({
+            type: 'TERMINATE_PROCESS'
+        })
+    } catch (error) {
+        console.error('发送终止消息失败: ', error)
+    }
 }
 
 // 统一处理后台响应
 const handleBackgroundResponse = (response: any) => {
     if (!response) {
         window.addMessage('assistant', '未收到有效响应', 'error')
+        isSending.value = false
         return
     }
 
@@ -153,6 +186,7 @@ const handleBackgroundResponse = (response: any) => {
                 window.finishThinkingProcess()
                 window.addMessage('assistant', response.answer, 'success')
             }
+            isSending.value = false
             break
         
         case 'error':
@@ -161,6 +195,7 @@ const handleBackgroundResponse = (response: any) => {
                 window.finishThinkingProcess()
                 window.addMessage('assistant', response.error, 'error')
             }
+            isSending.value = false
             break
             
         case 'started':
@@ -177,6 +212,7 @@ const handleBackgroundResponse = (response: any) => {
             } else {
                 window.addMessage('assistant', '收到未知格式的响应', 'error')
             }
+            isSending.value = false
     }
 }
 
@@ -496,8 +532,14 @@ onMounted(() => {
     background: white;
     display: flex;
     gap: 12px;
-    align-items: center;
+    align-items: flex-start;
     flex-shrink: 0;
+}
+
+.input-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 .message-input {
@@ -509,6 +551,7 @@ onMounted(() => {
     outline: none;
     transition: all 0.3s ease;
     background: #f8f9fa;
+    margin-bottom: 4px;
 }
 
 .message-input:focus {
@@ -525,12 +568,24 @@ onMounted(() => {
     border-radius: 25px;
     cursor: pointer;
     font-weight: 600;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
     box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
     display: flex;
     align-items: center;
     gap: 8px;
     font-size: 14px;
+    flex-shrink: 0;
+    margin-top: 0;
+}
+
+.send-button.terminate-button {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
+}
+
+.send-button.terminate-button:hover:not(:disabled) {
+    background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
+    box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
 }
 
 .send-icon {
