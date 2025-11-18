@@ -1,6 +1,5 @@
 <template>
     <div class="ai-assistant">
-        <!-- 复制成功提示 -->
         <div v-if="showCopyPopup" class="popup">
             {{ copyPopupMessage }}
         </div>
@@ -29,8 +28,6 @@
                             'status-success': message.status === 'success',
                             'status-error': message.status === 'error'
                         }"
-                        @mouseenter="onMessageHover(message.id, true)"
-                        @mouseleave="onMessageHover(message.id, false)"
                         @click="onMessageClick(message.id)">
                         <div class="message-background"></div>
                         <div class="message-content-wrapper">
@@ -61,7 +58,7 @@
                             
                             <div v-if="message.type !== 'thinking'" class="message-footer">
                                 <div v-if="message.type === 'user'" class="message-time">{{ message.timestamp }}</div>
-                                <button class="copy-button" @click="copyToClipboard(message.content)" :title="'复制'">
+                                <button class="copy-button" @click.stop="copyToClipboard(message.content)" :title="'复制'">
                                     <img src="/icons/copy.png" alt="复制" class="copy-icon" />
                                 </button>
                                 <div v-if="message.type === 'assistant'" class="message-time">{{ message.timestamp }}</div>
@@ -207,10 +204,7 @@ const sendMessage = async () => {
         handleBackgroundResponse(response)
         
     } catch (error) {
-        console.error('发送消息失败: ', error)
-        
-        let errorContent = '抱歉，处理您的问题时遇到了错误，请稍后再试。'
-        window.addMessage('assistant', errorContent, 'error')
+        window.addMessage('assistant', '抱歉，处理您的问题时遇到了错误，请稍后再试。', 'error')
         isSending.value = false
     }
     
@@ -281,8 +275,8 @@ const handleBackgroundResponse = (response: any) => {
                 const status = response.error ? 'error' : 'success'
                 window.addMessage('assistant', content, status)
             } else {
-                // 记录未知响应格式，便于调试
-                console.warn('收到未知格式的响应:', response)
+                // 记录未知响应格式
+                console.warn('收到未知格式的响应: ', response)
                 window.addMessage('assistant', '收到未知格式的响应', 'error')
             }
             isSending.value = false
@@ -300,10 +294,32 @@ const scrollToBottom = async () => {
 // 复制到剪贴板功能
 const copyToClipboard = async (content: string) => {
     try {
-        await navigator.clipboard.writeText(content)
-        showCopyPopupMessage('内容已复制到剪贴板')
+        if (!content || content.trim() === '') {
+            showCopyPopupMessage('没有可复制的内容')
+            return
+        }
+        
+        const textArea = document.createElement('textarea')
+        textArea.value = content
+        textArea.style.position = 'fixed'
+        textArea.style.left = '-999999px'
+        textArea.style.top = '-999999px'
+        textArea.style.opacity = '0'
+        document.body.appendChild(textArea)
+        textArea.focus()
+        textArea.select()
+        
+        const successful = document.execCommand('copy')
+        document.body.removeChild(textArea)
+        
+        if (successful) {
+            showCopyPopupMessage('内容已复制到剪贴板')
+        } else {
+            throw new Error('复制命令执行失败')
+        }
     } catch (error) {
         console.error('复制失败: ', error)
+        showCopyPopupMessage('复制失败，请手动复制')
     }
 }
 
@@ -336,12 +352,6 @@ const isThinkingComplete = (message: Message): boolean => {
 // 判断是否为新步骤
 const isNewStep = (stepId: number): boolean => {
     return newStepIds.value.has(stepId)
-}
-
-// 消息悬停处理
-const onMessageHover = (messageId: number, isHovering: boolean) => {
-    // 可以在这里添加悬停效果逻辑
-    console.log(`Message ${messageId} hover: ${isHovering}`)
 }
 
 // 消息点击处理
@@ -482,13 +492,8 @@ const loadApiKeyToInput = async () => {
             type: 'GET_API_KEY'
         })
         
-        console.log('加载 API 密钥响应:', response)
-        
         if (response && response.status === 'success' && response.apiKey) {
             apiKeyInput.value = response.apiKey
-            console.log('API 密钥已成功填入输入框，长度: ', response.apiKey.length)
-        } else {
-            console.log('未找到已保存的 API 密钥')
         }
     } catch (error) {
         console.error('加载 API 密钥失败: ', error)
@@ -542,17 +547,14 @@ const saveApiKey = async () => {
             apiKey: apiKeyInput.value.trim()
         })
         
-        console.log('保存 API 密钥响应:', response)
-        
         // 检查响应状态
         if (response && response.status === 'success') {
             showCopyPopupMessage('API 密钥保存成功')
             checkApiKeyStatus()
         } else {
-            // 显示具体的错误信息
             const errorMessage = response?.error || '未知错误'
             showCopyPopupMessage(`保存失败: ${errorMessage}`)
-            console.error('保存失败详情:', response)
+            console.error('保存失败详情: ', response)
         }
     } catch (error) {
         console.error('保存 API 密钥失败: ', error)
@@ -565,8 +567,6 @@ const checkApiKeyStatus = async () => {
         const response = await chrome.runtime.sendMessage({
             type: 'GET_API_KEY'
         })
-        
-        console.log('检查 API 密钥状态响应:', response)
         
         // 检查响应状态和字段
         if (response && response.status === 'success') {
@@ -583,7 +583,7 @@ const checkApiKeyStatus = async () => {
                 apiKeyInput.value = response.apiKey
             }
         } else {
-            console.warn('检查 API 密钥状态失败:', response)
+            console.warn('检查 API 密钥状态失败: ', response)
             isApiKeyConfigured.value = false
         }
     } catch (error) {

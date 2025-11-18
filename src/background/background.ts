@@ -114,7 +114,7 @@ async function handleQuestion(question: string, sendResponse: (response: any) =>
             (error: Error) => {
                 if (isAborted) return
                 
-                console.error('豆包 AI API 调用失败:', error)
+                console.error('豆包 AI API 调用失败: ', error)
                 chrome.runtime.sendMessage({
                     type: 'error',
                     error: `豆包 AI 调用失败: ${error.message}`,
@@ -153,7 +153,7 @@ async function handleTabInfo(tabId: number | undefined, sendResponse: (response:
     }
 }
 
-// 处理设置API密钥
+// 处理设置 API 密钥
 async function handleSetApiKey(apiKey: string, sendResponse: (response: any) => void) {
     try {
         if (!apiKey || apiKey.trim().length === 0) {
@@ -161,7 +161,6 @@ async function handleSetApiKey(apiKey: string, sendResponse: (response: any) => 
         }
         
         await saveApiKey(apiKey.trim())
-        console.log('API 密钥已保存')
         sendResponse({
             type: 'success',
             message: 'API 密钥保存成功',
