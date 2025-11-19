@@ -584,7 +584,7 @@ const checkApiKeyStatus = async () => {
 
 onMounted(() => {
     window.addMessage('assistant', 
-        '你好！我是 AI 开发者助手，可以帮你分析页面 DOM 结构、CSS 样式、网络请求等。有什么问题尽管问我！',
+        '你好！我是AI开发者助手，可以帮你分析页面DOM结构、CSS样式、网络请求等。有什么问题尽管问我！',
         'success')
 
     chrome.runtime.onMessage.addListener((message) => {

@@ -6,7 +6,15 @@
         <div class="message-background"></div>
         <div class="message-content-wrapper">
             <!-- 普通消息内容 -->
-            <div v-if="message.type !== 'thinking'" class="message-content">{{ message.content }}</div>
+            <div v-if="message.type !== 'thinking'" class="message-content">
+                <!-- AI助手消息使用Markdown渲染 -->
+                <MarkdownRenderer 
+                    v-if="message.type === 'assistant'" 
+                    :content="message.content" 
+                />
+                <!-- 用户消息直接显示 -->
+                <span v-else>{{ message.content }}</span>
+            </div>
             
             <!-- 思考过程消息 -->
             <div v-else class="thinking-content">
@@ -57,6 +65,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import MarkdownRenderer from './MarkdownRenderer.vue'
 
 // 接口定义
 interface ThinkingStep {
@@ -128,7 +137,7 @@ const copyToClipboard = async (content: string) => {
 
 <style scoped>
 .message {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     padding: 12px 16px;
     border-radius: 12px;
     max-width: 75%;
@@ -199,9 +208,12 @@ const copyToClipboard = async (content: string) => {
     filter: brightness(0.85);
 }
 
+.message.assistant .message-content-wrapper { margin-bottom: -4px; }
+.message.assistant .markdown-content { margin-bottom: -20px; }
+
 /* 消息内容 */
 .message-content {
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     line-height: 1.4;
     word-wrap: break-word;
     font-size: 15px;
@@ -213,7 +225,7 @@ const copyToClipboard = async (content: string) => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 4px;
+    margin-top: 2px;
     gap: 8px;
 }
 

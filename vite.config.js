@@ -56,7 +56,22 @@ export default defineConfig({
       output: {
         entryFileNames: '[name].js',
         chunkFileNames: '[name].js',
-        assetFileNames: '[name].[ext]',
+        assetFileNames: (assetInfo) => {
+          // 将字体文件放到 fonts 目录
+          if (assetInfo.name && /\.(woff|woff2|eot|ttf|otf)$/.test(assetInfo.name)) {
+            return 'fonts/[name].[ext]'
+          }
+          // 图片文件放到 icons 目录
+          if (assetInfo.name && /\.(png|jpe?g|gif|svg|webp|ico)$/i.test(assetInfo.name)) {
+            return 'icons/[name].[ext]'
+          }
+          // CSS 文件保持原名
+          if (assetInfo.name && /\.css$/.test(assetInfo.name)) {
+            return '[name].[ext]'
+          }
+          // 其他资源保持原名
+          return '[name].[ext]'
+        },
         manualChunks: undefined
       },
       treeshake: 'smallest'
