@@ -10,7 +10,7 @@ let currentAbortController: AbortController | null = null
 // 监听来自 DevTools Panel 和 Content Script 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'ASK_QUESTION') {
-        handleQuestion(request.question, sender, sendResponse)
+        handleQuestion(request.question, request.requestId, sender, sendResponse)
         return true
     } else if (request.type === 'GET_TAB_INFO') {
         handleTabInfo(sender.tab?.id, sendResponse)
@@ -33,13 +33,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // 管理所有 Content Script 连接
 const contentScriptPorts = new Map<string, chrome.runtime.Port>()
 
+// 管理所有 Panel 连接
+const panelPorts = new Map<string, chrome.runtime.Port>()
+
 // 监听来自 Content Script 的长连接
 chrome.runtime.onConnect.addListener((port) => {
     if (port.name === 'content-script') {
         const portId = `${port.sender?.tab?.id || 'unknown'}-${Date.now()}`
         
         contentScriptPorts.set(portId, port)
-        port.onDisconnect.addListener(() => { contentScriptPorts.delete(portId) })
+        port.onDisconnect.addListener(() => { 
+            contentScriptPorts.delete(portId)
+            console.log(`Content Script 连接断开: ${portId}`)
+        })
         
         // 发送确认消息
         try {
@@ -50,6 +56,32 @@ chrome.runtime.onConnect.addListener((port) => {
             })
         } catch (error) {
             console.error('发送连接确认失败: ', error)
+        }
+    } else if (port.name === 'question-response') {
+        // 处理 Panel 连接
+        const portId = `panel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+        
+        panelPorts.set(portId, port)
+        console.log(`Panel 连接建立: ${portId}`)
+        
+        port.onDisconnect.addListener(() => { 
+            panelPorts.delete(portId)
+            console.log(`Panel 连接断开: ${portId}`)
+            
+            if (chrome.runtime.lastError) {
+                console.error(`Panel 连接断开错误: ${chrome.runtime.lastError.message}`)
+            }
+        })
+        
+        // 发送连接确认
+        try {
+            port.postMessage({
+                type: 'CONNECTION_ACK',
+                portId: portId,
+                timestamp: new Date().toISOString()
+            })
+        } catch (error) {
+            console.error('发送 Panel 连接确认失败: ', error)
         }
     }
 })
@@ -174,18 +206,71 @@ function handleTerminate(sendResponse: (response: any) => void) {
     }
 }
 
-async function handleQuestion(question: string, sender: chrome.runtime.MessageSender, sendResponse: (response: any) => void) {
+async function handleQuestion(question: string, requestId: string, sender: chrome.runtime.MessageSender, sendResponse: (response: any) => void) {
+    let panelPort: chrome.runtime.Port | null = null
+    
     try {
         // 建立与 Panel 的长连接用于发送多个响应
-        const panelPort = chrome.runtime.connect({ name: 'question-response' })
+        panelPort = chrome.runtime.connect({ name: 'question-response' })
+        
+        // 设置连接超时
+        const connectionTimeout = setTimeout(() => {
+            if (panelPort) {
+                console.warn('Panel 连接超时，断开连接')
+                panelPort.disconnect()
+                panelPort = null
+            }
+        }, 5000)
+        
+        // 等待 Panel 的连接确认
+        const connectionAckPromise = new Promise<void>((resolve, reject) => {
+            let ackReceived = false
+            
+            panelPort!.onMessage.addListener((message) => {
+                if (message.type === 'CONNECTION_ACK') {
+                    ackReceived = true
+                    console.log('收到 Panel 连接确认: ', message.portId)
+                    clearTimeout(connectionTimeout)
+                    resolve()
+                }
+            })
+            
+            panelPort!.onDisconnect.addListener(() => {
+                clearTimeout(connectionTimeout)
+                if (!ackReceived) {
+                    if (chrome.runtime.lastError) {
+                        console.error('Panel 连接断开: ', chrome.runtime.lastError.message)
+                    }
+                    reject(new Error('Panel 连接断开，未收到确认'))
+                }
+            })
+        })
+        
+        // 等待连接确认或超时
+        await connectionAckPromise
+        console.log('Background 与 Panel 长连接建立成功')
+        
+        // 重新设置断开监听器
+        panelPort.onDisconnect.addListener(() => {
+            console.log('Panel 连接已断开')
+            panelPort = null
+        })
         // 询问 AI 是否需要使用 DOM 检测工具
         const domAnalysis = await shouldUseDOMAnalysis(question)
 
         if (domAnalysis.shouldAnalyze) {
-            panelPort.postMessage({
-                type: 'thinking',
-                content: '正在使用 DOM 分析工具...'
-            })
+            if (panelPort) {
+                    try {
+                        panelPort.postMessage({
+                            type: 'thinking',
+                            content: '正在使用 DOM 分析工具...',
+                            requestId: requestId
+                        })
+                    } catch (error) {
+                        console.error('发送思考状态失败: ', error)
+                        panelPort = null
+                    }
+                }
 
             // 优先使用消息中传递的 tabId，然后是 sender.tab.id，最后才查询
             let tabId = (sender as any).tabId || sender.tab?.id
@@ -199,11 +284,18 @@ async function handleQuestion(question: string, sender: chrome.runtime.MessageSe
             }
             
             if (!tabId) {
-                panelPort.postMessage({
-                    type: 'error',
-                    error: '无法获取当前标签页信息，请确保在网页上打开 DevTools'
-                })
-                panelPort.disconnect()
+                if (panelPort) {
+                    try {
+                        panelPort.postMessage({
+                            type: 'error',
+                            error: '无法获取当前标签页信息，请确保在网页上打开 DevTools',
+                            requestId: requestId
+                        })
+                        panelPort.disconnect()
+                    } catch (error) {
+                        console.error('发送标签页错误失败: ', error)
+                    }
+                }
                 return
             }
 
@@ -275,11 +367,18 @@ async function handleQuestion(question: string, sender: chrome.runtime.MessageSe
                         const prompt = buildAIPrompt(question, pageData)
                         const apiKey = await getApiKeyFromStorage()
                         if (!apiKey || apiKey.trim() === '') {
-                            panelPort.postMessage({
-                                type: 'error',
-                                error: 'API 密钥未配置，请在设置中配置豆包 AI API 密钥'
-                            })
-                            panelPort.disconnect()
+                            if (panelPort) {
+                                try {
+                                    panelPort.postMessage({
+                                        type: 'error',
+                                        error: 'API 密钥未配置，请在设置中配置豆包 AI API 密钥',
+                                        requestId: requestId
+                                    })
+                                    panelPort.disconnect()
+                                } catch (error) {
+                                    console.error('发送 API 密钥错误失败: ', error)
+                                }
+                            }
                             return
                         }
                         const aiClient = new DoubaoAIClient(apiKey)
@@ -296,41 +395,72 @@ async function handleQuestion(question: string, sender: chrome.runtime.MessageSe
                             }],
                             // onChunk - 处理每个数据块
                             (chunk: string) => {
+                                if (panelPort) {
+                            try {
                                 panelPort.postMessage({
                                     type: 'streaming_content',
                                     content: chunk,
-                                    isFirstChunk: isFirstChunk
+                                    isFirstChunk: isFirstChunk,
+                                    requestId: requestId
                                 })
+                            } catch (error) {
+                                console.error('发送流式内容失败: ', error)
+                                panelPort = null
+                            }
+                        }
                                 isFirstChunk = false
                             },
                             // onComplete - 流式完成
                             () => {
                                 currentAbortController = null
-                                panelPort.postMessage({
-                                    type: 'streaming_complete'
-                                })
-                                panelPort.disconnect()
+                                if (panelPort) {
+                                    try {
+                                        panelPort.postMessage({
+                                            type: 'streaming_complete',
+                                            requestId: requestId
+                                        })
+                                        panelPort.disconnect()
+                                    } catch (error) {
+                                        console.error('发送完成消息失败: ', error)
+                                    }
+                                    panelPort = null
+                                }
                             },
                             // onError - 错误处理
                             (error: Error) => {
                                 currentAbortController = null
                                 console.error('流式 API 调用失败: ', error)
-                                panelPort.postMessage({
-                                    type: 'error',
-                                    error: 'AI 生成失败: ' + error.message
-                                })
-                                panelPort.disconnect()
+                                if (panelPort) {
+                                    try {
+                                        panelPort.postMessage({
+                                            type: 'error',
+                                            error: 'AI 生成失败: ' + error.message,
+                                            requestId: requestId
+                                        })
+                                        panelPort.disconnect()
+                                    } catch (sendError) {
+                                        console.error('发送错误消息失败: ', sendError)
+                                    }
+                                    panelPort = null
+                                }
                             },
                             // abortSignal - 中断信号
                             currentAbortController.signal
                         )
                     } catch (detailedError) {
                         console.error('获取详细数据时出错: ', detailedError)
-                        panelPort.postMessage({
-                            type: 'error',
-                            error: '获取页面详细数据失败: ' + (detailedError as Error).message
-                        })
-                        panelPort.disconnect()
+                        if (panelPort) {
+                            try {
+                                panelPort.postMessage({
+                                    type: 'error',
+                                    error: '获取页面详细数据失败: ' + (detailedError as Error).message,
+                                    requestId: requestId
+                                })
+                                panelPort.disconnect()
+                            } catch (error) {
+                                console.error('发送详细数据错误失败: ', error)
+                            }
+                        }
                     }
                 } else {
                     sendResponse({
@@ -380,7 +510,20 @@ async function handleQuestion(question: string, sender: chrome.runtime.MessageSe
                 ]
 
                 // 发送开始响应
-                panelPort.postMessage({ type: 'started' })
+                if (panelPort) {
+                    try {
+                        panelPort.postMessage({ 
+                            type: 'started',
+                            requestId: requestId
+                        })
+                    } catch (error) {
+                        console.error('发送开始消息失败: ', error)
+                        panelPort = null
+                        return
+                    }
+                } else {
+                    return
+                }
 
                 // 调用 AI 流式 API
                 let isFirstChunk = true
@@ -388,39 +531,73 @@ async function handleQuestion(question: string, sender: chrome.runtime.MessageSe
                     messages,
                     // onChunk - 处理流式数据块
                     (chunk: string) => {
-                        panelPort.postMessage({
-                            type: 'streaming_content',
-                            content: chunk,
-                            isFirstChunk
-                        })
+                        if (panelPort) {
+                            try {
+                                panelPort.postMessage({
+                                    type: 'streaming_content',
+                                    content: chunk,
+                                    isFirstChunk,
+                                    requestId: requestId
+                                })
+                            } catch (error) {
+                                console.error('发送流式内容失败: ', error)
+                                panelPort = null
+                            }
+                        }
                         isFirstChunk = false
                     },
                     // onComplete - 流式完成
                     () => {
                         currentAbortController = null
-                        panelPort.postMessage({ type: 'streaming_complete' })
-                        panelPort.disconnect()
+                        if (panelPort) {
+                            try {
+                                panelPort.postMessage({ 
+                                    type: 'streaming_complete',
+                                    requestId: requestId
+                                })
+                                panelPort.disconnect()
+                            } catch (error) {
+                                console.error('发送完成消息失败: ', error)
+                            }
+                            panelPort = null
+                        }
                     },
                     // onError - 错误处理
                     (error: Error) => {
                         currentAbortController = null
                         console.error('流式 API 调用失败: ', error)
-                        panelPort.postMessage({
-                            type: 'error',
-                            error: 'AI 生成失败: ' + error.message
-                        })
-                        panelPort.disconnect()
+                        if (panelPort) {
+                            try {
+                                panelPort.postMessage({
+                                    type: 'error',
+                                    error: 'AI 生成失败: ' + error.message,
+                                    requestId: requestId
+                                })
+                                panelPort.disconnect()
+                            } catch (sendError) {
+                                console.error('发送错误消息失败: ', sendError)
+                            }
+                            panelPort = null
+                        }
                     },
                     // abortSignal - 中断信号
                     currentAbortController.signal
                 )
             } catch (error) {
                 console.error('处理正常对话时出错: ', error)
-                panelPort.postMessage({
-                    type: 'error',
-                    error: '处理问题时出错: ' + (error as Error).message
-                })
-                panelPort.disconnect()
+                if (panelPort) {
+                    try {
+                        panelPort.postMessage({
+                            type: 'error',
+                            error: '处理问题时出错: ' + (error as Error).message,
+                            requestId: requestId
+                        })
+                        panelPort.disconnect()
+                    } catch (sendError) {
+                        console.error('发送错误消息失败: ', sendError)
+                    }
+                    panelPort = null
+                }
             }
             return
         }

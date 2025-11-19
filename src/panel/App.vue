@@ -95,21 +95,110 @@ const accumulatedContent = ref('') // 用于累积流式内容
 // 请求管理相关
 const currentRequestId = ref<string | null>(null)
 
+// 长连接管理
+let panelPort: chrome.runtime.Port | null = null
+let connectionRetryCount = 0
+const maxRetryCount = 3
+const connectionRetryDelay = 1000
+
+// 连接状态管理
+const connectionStatus = ref<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected')
+
+// 建立长连接
+const establishConnection = () => {
+    if (panelPort) {
+        console.log('长连接已存在，跳过建立')
+        return panelPort
+    }
+
+    connectionStatus.value = 'connecting'
+    console.log('正在建立与 Background 的长连接...')
+    
+    try {
+        panelPort = chrome.runtime.connect({ name: 'question-response' })
+        
+        panelPort.onMessage.addListener((message) => {
+            console.log('Panel 收到长连接消息: ', message)
+            handleBackgroundResponse(message)
+        })
+        
+        panelPort.onDisconnect.addListener(() => {
+            console.log('Panel 长连接已断开')
+            panelPort = null
+            connectionStatus.value = 'disconnected'
+            
+            // 检查是否需要重连
+            if (chrome.runtime.lastError) {
+                console.error('连接断开原因: ', chrome.runtime.lastError.message)
+                connectionStatus.value = 'error'
+                
+                // 如果不是主动断开且重试次数未超限，则尝试重连
+                if (connectionRetryCount < maxRetryCount) {
+                    connectionRetryCount++
+                    console.log(`尝试重连 (${connectionRetryCount}/${maxRetryCount})...`)
+                    setTimeout(() => {
+                        establishConnection()
+                    }, connectionRetryDelay * connectionRetryCount)
+                } else {
+                    console.error('长连接重连次数已达上限，停止重连')
+                }
+            }
+        })
+        
+        // 连接成功
+        connectionStatus.value = 'connected'
+        connectionRetryCount = 0
+        console.log('Panel 长连接建立成功')
+        
+        return panelPort
+        
+    } catch (error) {
+        console.error('建立长连接失败: ', error)
+        connectionStatus.value = 'error'
+        panelPort = null
+        return null
+    }
+}
+
 // 在组件挂载时设置长连接监听
 onMounted(() => {
-    // 监听来自 Background 的长连接
+    // 只监听来自 Background 的长连接，不主动连接
     chrome.runtime.onConnect.addListener((port) => {
         if (port.name === 'question-response') {
             console.log('Panel 收到 Background 长连接')
             
-            port.onMessage.addListener((message) => {
-                console.log('Panel 收到长连接消息: ', message)
-                handleBackgroundResponse(message)
-            })
-            
-            port.onDisconnect.addListener(() => {
-                console.log('Panel 长连接已断开')
-            })
+            // 如果当前没有连接，使用这个连接
+            if (!panelPort) {
+                panelPort = port
+                
+                port.onMessage.addListener((message) => {
+                    console.log('Panel 收到长连接消息: ', message)
+                    handleBackgroundResponse(message)
+                })
+                
+                port.onDisconnect.addListener(() => {
+                    console.log('Panel 长连接已断开')
+                    panelPort = null
+                    connectionStatus.value = 'disconnected'
+                })
+                
+                connectionStatus.value = 'connected'
+                connectionRetryCount = 0
+                
+                // 发送连接确认消息给 Background
+                try {
+                    port.postMessage({
+                        type: 'CONNECTION_ACK',
+                        portId: Date.now().toString()
+                    })
+                    console.log('已发送连接确认消息给 Background')
+                } catch (error) {
+                    console.error('发送连接确认失败: ', error)
+                }
+            } else {
+                // 如果已有连接，断开这个多余的连接
+                port.disconnect()
+            }
         }
     })
 })
@@ -295,6 +384,10 @@ const handleBackgroundResponse = (response: any) => {
             
         case 'started':
             // 处理开始响应
+            break
+            
+        case 'CONNECTION_ACK':
+            console.log('长连接已确认: ', response.portId)
             break
             
         default:

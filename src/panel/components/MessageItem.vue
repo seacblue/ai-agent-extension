@@ -7,7 +7,7 @@
         <div class="message-content-wrapper">
             <!-- 普通消息内容 -->
             <div v-if="message.type !== 'thinking'" class="message-content">
-                <!-- AI助手消息使用Markdown渲染 -->
+                <!-- AI 助手消息使用 Markdown 渲染 -->
                 <MarkdownRenderer 
                     v-if="message.type === 'assistant'" 
                     :content="message.content" 
@@ -208,7 +208,6 @@ const copyToClipboard = async (content: string) => {
     filter: brightness(0.85);
 }
 
-.message.assistant .message-content-wrapper { margin-bottom: -4px; }
 .message.assistant .markdown-content { margin-bottom: -20px; }
 
 /* 消息内容 */

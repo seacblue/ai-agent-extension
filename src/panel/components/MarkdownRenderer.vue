@@ -87,10 +87,11 @@ const renderedContent = computed(() => {
 <style scoped>
 .markdown-content {
   line-height: 1.4;
+  margin: 0;
   word-wrap: break-word;
 }
 
-.markdown-content :deep(> :last-child) { margin-bottom: 0; }
+.markdown-content * { margin: 0; }
 
 .markdown-content :deep(h1),
 .markdown-content :deep(h2),
@@ -98,44 +99,44 @@ const renderedContent = computed(() => {
 .markdown-content :deep(h4),
 .markdown-content :deep(h5),
 .markdown-content :deep(h6) {
-  margin-top: 0;
-  margin-bottom: 0;
+  margin-bottom: -0.3em;
   font-weight: 600;
 }
 
-.markdown-content :deep(h1) { font-size: 1.5em; }
-.markdown-content :deep(h2) { font-size: 1.3em; }
-.markdown-content :deep(h3) { font-size: 1.1em; }
-
-.markdown-content :deep(p) {
-  margin: 0 0;
-}
+.markdown-content :deep(h1) { font-size: 2em; }
+.markdown-content :deep(h2) { font-size: 1.6em; }
+.markdown-content :deep(h3) { font-size: 1.4em; }
+.markdown-content :deep(h4) { font-size: 1.2em; }
+.markdown-content :deep(h5) { font-size: 1.1em; }
+.markdown-content :deep(h6) { font-size: 1em; }
 
 .markdown-content :deep(ul),
 .markdown-content :deep(ol) {
-  margin: 0 0;
+  margin-top: -1em;
+  margin-bottom: -1em;
   padding-left: 1.5em;
 }
-
 .markdown-content :deep(li) {
-  margin: 0 0;
+  margin-top: -0.4em;
+  margin-bottom: -0.4em;
 }
 
 .markdown-content :deep(code) {
   background-color: #f1f3f4;
-  padding: 0.2em 0.4em;
   border-radius: 3px;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 0.9em;
 }
 
 .markdown-content :deep(pre) {
-  background-color: #f8f9fa;
-  border: 1px solid #e9ecef;
+  background-color: #f6f8fa;
+  border: 1px solid #e1e4e8;
   border-radius: 6px;
-  padding: 1em;
+  padding: 16px;
+  margin: 16px 0;
   overflow-x: auto;
-  margin: 0.5em 0;
+  transform: translateY(-1em);
+  margin-bottom: 0.4em;
 }
 
 .markdown-content :deep(pre code) {
@@ -154,13 +155,11 @@ const renderedContent = computed(() => {
 .markdown-content :deep(table) {
   border-collapse: collapse;
   width: 100%;
-  margin: 0.5em 0;
 }
 
 .markdown-content :deep(th),
 .markdown-content :deep(td) {
   border: 1px solid #ddd;
-  padding: 0.5em;
   text-align: left;
 }
 
@@ -173,36 +172,18 @@ const renderedContent = computed(() => {
   color: #007bff;
   text-decoration: none;
 }
-
-.markdown-content :deep(a:hover) {
-  text-decoration: underline;
-}
-
-.markdown-content :deep(strong) {
-  font-weight: 600;
-}
-
-.markdown-content :deep(em) {
-  font-style: italic;
-}
+.markdown-content :deep(a:hover) { text-decoration: underline; }
+.markdown-content :deep(strong) { font-weight: 600; }
+.markdown-content :deep(em) { font-style: italic; }
 
 /* KaTeX样式调整 */
-.markdown-content :deep(.katex) {
-  font-size: 1em;
-}
-
+.markdown-content :deep(.katex) { font-size: 1em; }
 .markdown-content :deep(.katex-display) {
-  margin: 0.3em 0;
   text-align: center;
 }
 
 /* 块级公式容器样式 */
-.markdown-content :deep(.katex-display .katex) {
-  font-size: 1.1em;
-}
-
+.markdown-content :deep(.katex-display .katex) { font-size: 1.1em; }
 /* 行内公式样式 */
-.markdown-content :deep(.katex:not(.katex-display)) {
-  font-size: 0.95em;
-}
+.markdown-content :deep(.katex:not(.katex-display)) { font-size: 0.95em; }
 </style>
