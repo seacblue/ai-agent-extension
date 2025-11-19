@@ -23,7 +23,13 @@ export async function getApiKeyFromStorage(): Promise<string> {
     if (typeof chrome !== 'undefined' && chrome.storage) {
       chrome.storage.local.get(['volcesApiKey'], (result) => {
         const apiKey = result.volcesApiKey as string | undefined;
-        resolve(apiKey || '');
+        
+        // 如果未设置，返回空字符串；如果设置了，直接返回值（包括空字符串）
+        if (apiKey === undefined) {
+          resolve('');
+        } else {
+          resolve(apiKey);
+        }
       });
     } else {
       resolve('');
@@ -32,11 +38,11 @@ export async function getApiKeyFromStorage(): Promise<string> {
 }
 
 // 保存 API 密钥到 Chrome 存储
-export async function saveApiKey(apiKey: string): Promise<void> {
+export async function saveApiKey(apiKey: string, allowEmpty: boolean = false): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof chrome !== 'undefined' && chrome.storage) {
-      // 验证 API 密钥格式
-      if (!apiKey || apiKey.trim().length === 0) {
+      // 验证 API 密钥格式（除非允许空值）
+      if (!allowEmpty && (!apiKey || apiKey.trim().length === 0)) {
         reject(new Error('API 密钥不能为空'));
         return;
       }
@@ -58,5 +64,5 @@ export async function saveApiKey(apiKey: string): Promise<void> {
 
 export async function isApiKeyConfigured(): Promise<boolean> {
   const apiKey = await getApiKeyFromStorage();
-  return Boolean(apiKey && apiKey.length > 0);
+  return Boolean(apiKey && apiKey.trim().length > 0);
 }

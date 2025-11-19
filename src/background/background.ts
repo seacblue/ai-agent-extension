@@ -23,6 +23,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.type === 'GET_API_KEY') {
         handleGetApiKey(sendResponse)
         return true
+    } else if (request.type === 'CLEAR_API_KEY') {
+        handleClearApiKey(sendResponse)
+        return true
     }
 })
 
@@ -45,14 +48,16 @@ async function handleQuestion(question: string, sendResponse: (response: any) =>
         // 获取 API 密钥
         const apiKey = await getApiKeyFromStorage()
         
-        if (!apiKey) {
+        /*
+        if (!apiKey || apiKey.trim().length === 0) {
             sendResponse({
                 type: 'error',
-                error: '请先在设置中配置豆包 AI API 密钥',
+                error: 'API 密钥不能为空',
                 status: 'error'
             })
             return
         }
+        */
 
         // 创建 AI 客户端
         const aiClient = new DoubaoAIClient(apiKey)
@@ -86,6 +91,7 @@ async function handleQuestion(question: string, sendResponse: (response: any) =>
 
         // 使用流式 API 调用
         let fullContent = ''
+        let isFirstChunk = true
         await aiClient.sendMessageStream(
             messages,
             (chunk: string) => {
@@ -94,18 +100,22 @@ async function handleQuestion(question: string, sendResponse: (response: any) =>
                 // 累积内容
                 fullContent += chunk
                 
-                // 发送流式内容
+                // 发送流式内容，包含累积的完整内容
                 chrome.runtime.sendMessage({
                     type: 'streaming_content',
-                    content: chunk
+                    content: fullContent,
+                    chunk: chunk,
+                    isFirstChunk: isFirstChunk
                 })
+                
+                isFirstChunk = false
             },
             () => {
                 if (isAborted) return
                 
                 // 流式传输完成，发送完整内容作为最终答案
                 chrome.runtime.sendMessage({
-                    type: 'answer',
+                    type: 'streaming_complete',
                     answer: fullContent,
                     status: 'success'
                 })
@@ -117,7 +127,7 @@ async function handleQuestion(question: string, sendResponse: (response: any) =>
                 console.error('豆包 AI API 调用失败: ', error)
                 chrome.runtime.sendMessage({
                     type: 'error',
-                    error: `豆包 AI 调用失败: ${error.message}`,
+                    error: `${error.message}`,
                     status: 'error'
                 })
                 currentAIProcess = null
@@ -180,7 +190,7 @@ async function handleSetApiKey(apiKey: string, sendResponse: (response: any) => 
 async function handleGetApiKey(sendResponse: (response: any) => void) {
     try {
         const apiKey = await getApiKeyFromStorage()
-        const hasKey = apiKey && apiKey.length > 0
+        const hasKey = apiKey && apiKey.trim().length > 0
         sendResponse({
             type: 'success',
             configured: hasKey,
@@ -195,6 +205,25 @@ async function handleGetApiKey(sendResponse: (response: any) => void) {
             status: 'error',
             configured: false,
             apiKey: null
+        })
+    }
+}
+
+// 处理清空 API 密钥
+async function handleClearApiKey(sendResponse: (response: any) => void) {
+    try {
+        await saveApiKey('', true) // 允许空值来清空 API 密钥
+        sendResponse({
+            type: 'success',
+            message: 'API 密钥已清空',
+            status: 'success'
+        })
+    } catch (error) {
+        console.error('清空 API 密钥失败: ', error)
+        sendResponse({
+            type: 'error',
+            error: '清空 API 密钥失败: ' + (error as Error).message,
+            status: 'error'
         })
     }
 }

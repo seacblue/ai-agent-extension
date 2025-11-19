@@ -1,7 +1,7 @@
 <template>
     <div class="ai-assistant">
-        <div v-if="showCopyPopup" class="popup">
-            {{ copyPopupMessage }}
+        <div v-if="showPopup" class="popup" :class="popupType">
+            {{ popupMessage }}
         </div>
         
         <header class="assistant-header">
@@ -19,116 +19,44 @@
         <main class="assistant-main">
             <div class="chat-container">
                 <div class="messages" ref="messagesRef">
-                    <div v-for="message in messages" :key="message.id" 
-                        :class="{
-                            'message': true,
-                            'user': message.type === 'user',
-                            'assistant': message.type === 'assistant',
-                            'thinking': message.type === 'thinking',
-                            'status-success': message.status === 'success',
-                            'status-error': message.status === 'error'
-                        }"
-                        @click="onMessageClick(message.id)">
-                        <div class="message-background"></div>
-                        <div class="message-content-wrapper">
-                            <!-- 普通消息内容 -->
-                            <div v-if="message.type !== 'thinking'" class="message-content">{{ message.content }}</div>
-                            
-                            <!-- 思考过程消息 -->
-                            <div v-else class="thinking-content">
-                                <div class="thinking-steps">
-                                    <div v-for="(step, index) in message.thinkingSteps" :key="step.id" 
-                                         class="thinking-step"
-                                         :class="{ 
-                                             'new-step': isNewStep(step.id),
-                                             'thinking-complete': isThinkingComplete(message) && index === message.thinkingSteps!.length - 1
-                                         }">
-                                        <div class="step-content">{{ step.content }}</div>
-                                    </div>
-                                </div>
-                                <div v-if="!isThinkingComplete(message)" class="thinking-progress">
-                                    <span>思考进行中</span>
-                                    <div class="progress-dots">
-                                        <div class="progress-dot"></div>
-                                        <div class="progress-dot"></div>
-                                        <div class="progress-dot"></div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div v-if="message.type !== 'thinking'" class="message-footer">
-                                <div v-if="message.type === 'user'" class="message-time">{{ message.timestamp }}</div>
-                                <button class="copy-button" @click.stop="copyToClipboard(message.content)" :title="'复制'">
-                                    <img src="/icons/copy.png" alt="复制" class="copy-icon" />
-                                </button>
-                                <div v-if="message.type === 'assistant'" class="message-time">{{ message.timestamp }}</div>
-                            </div>
-                        </div>
-                    </div>
+                    <MessageItem 
+                        v-for="message in messages" 
+                        :key="message.id"
+                        :message="message"
+                        :new-step-ids="newStepIds"
+                        :is-streaming="isStreaming"
+                        :current-streaming-message="currentStreamingMessage"
+                        @message-click="onMessageClick"
+                        @copy-to-clipboard="copyToClipboard"
+                    />
                 </div>
         
-                <div class="input-area">
-                    <div class="input-wrapper">
-                        <input 
-                            v-model="inputText" 
-                            @keyup.enter="sendMessage"
-                            placeholder="输入问题，如：分析页面 DOM 结构..."
-                            class="message-input"
-                        />
-                    </div>
-                    <button @click="handleButtonClick" :disabled="!inputText.trim() && !isSending" class="send-button" :class="{ 'terminate-button': isSending }">
-                        <img :src="isSending ? '/icons/stop_thinking.png' : '/icons/send_message.png'" :alt="isSending ? '终止' : '发送'" class="send-icon" />
-                        <span>{{ isSending ? '终止' : '发送' }}</span>
-                    </button>
-                </div>
+                <MessageInput 
+                    ref="messageInputRef"
+                    :is-sending="isSending"
+                    @send-message="sendMessage"
+                    @terminate-message="terminateMessage"
+                />
             </div>
         </main>
         
         <!-- API 密钥设置模态框 -->
-        <div v-if="showApiKeySettings || isClosingModal" class="settings-modal" 
-             :class="{ 'modal-closing': isClosingModal }"
-             @mousedown="onModalMouseDown"
-             @mouseup="onModalMouseUp">
-            <div class="settings-content" :class="{ 'content-closing': isClosingModal }">
-                <div class="settings-header">
-                    <h3>API 密钥设置</h3>
-                    <button class="close-button" @mousedown="onCloseButtonClick">×</button>
-                </div>
-                <div class="settings-body">
-                    <div class="api-key-section">
-                        <label for="apiKey">豆包 AI API 密钥:</label>
-                        <div class="input-group">
-                            <input 
-                                id="apiKey"
-                                v-model="apiKeyInput" 
-                                type="password" 
-                                placeholder="请输入您的豆包 AI API 密钥"
-                                class="api-key-input"
-                                :class="{ 'has-value': apiKeyInput.length > 0 }"
-                            />
-                            <button class="toggle-visibility" @click="toggleApiKeyVisibility" :title="showApiKey ? '隐藏密钥' : '显示密钥'">
-                                <img 
-                                :src="showApiKey ? '/icons/eye_visible.png' : '/icons/eye_invisible.png'" 
-                                alt="切换显示" 
-                                class="toggle-icon" 
-                                />
-                            </button>
-                        </div>
-                    </div>
-                    <div class="settings-actions">
-                        <button class="save-button" @click="saveApiKey" :disabled="!apiKeyInput.trim()">
-                            保存密钥
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <ApiKeyModal 
+          :visible="showApiKeySettings"
+          :is-api-key-configured="isApiKeyConfigured"
+          @close="closeApiKeySettings"
+          @save-api-key="onApiKeySaved"
+          @clear-api-key="onApiKeyCleared"
+        />
     </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, nextTick, watch } from 'vue'
 import { generateId, getCurrentTimestamp } from '../shared/utils'
+import MessageItem from './components/MessageItem.vue'
+import MessageInput from './components/MessageInput.vue'
+import ApiKeyModal from './components/ApiKeyModal.vue'
 
 interface Message {
     id: number
@@ -146,34 +74,31 @@ interface ThinkingStep {
     timestamp: string
 }
 
-const inputText = ref('')
+const messageInputRef = ref<InstanceType<typeof MessageInput>>()
 const messages = reactive<Message[]>([])
 const messagesRef = ref<HTMLElement>()
 const newStepIds = ref<Set<number>>(new Set())
 const isSending = ref(false)
-const showCopyPopup = ref(false)
-const copyPopupMessage = ref('')
+const showPopup = ref(false)
+const popupMessage = ref('')
+const popupType = ref<'success' | 'error'>('success')
 
 // API 密钥设置相关
 const showApiKeySettings = ref(false)
-const apiKeyInput = ref('')
-const showApiKey = ref(false)
 const isApiKeyConfigured = ref(false)
-const isClosingModal = ref(false)
-const mouseDownTarget = ref<EventTarget | null>(null)
 
-const handleButtonClick = () => {
-    if (isSending.value) {
-        terminateMessage()
-    } else {
-        sendMessage()
-    }
-}
+// 流式内容处理相关
+const currentStreamingMessage = ref<Message | null>(null)
+const isStreaming = ref(false)
 
 const sendMessage = async () => {
-    if (!inputText.value.trim()) return
+    if (!messageInputRef.value?.getInputText().trim()) return
     
     isSending.value = true
+    
+    // 获取输入框内容并清空
+    const userInputText = messageInputRef.value.getInputText()
+    messageInputRef.value.clearInput()
     
     // 添加一个小延迟确保 UI 更新
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -181,16 +106,13 @@ const sendMessage = async () => {
     const userMessage: Message = {
         id: generateId(),
         type: 'user',
-        content: inputText.value,
+        content: userInputText,
         timestamp: getCurrentTimestamp(),
         status: 'success'
     }
     
     messages.push(userMessage)
-    const question = inputText.value
-    inputText.value = ''
-    
-    // 滚动到底部
+    const question = userInputText
     await scrollToBottom()
     
     // 发送消息到 Background Script
@@ -199,7 +121,6 @@ const sendMessage = async () => {
             type: 'ASK_QUESTION',
             question
         })
-        
         // 处理响应
         handleBackgroundResponse(response)
         
@@ -242,9 +163,22 @@ const handleBackgroundResponse = (response: any) => {
             break
             
         case 'streaming_content':
+            // 处理流式内容，实现实时拼接
+            if (response.content) {
+                handleStreamingContent(response.content, response.isFirstChunk)
+            }
             break
             
         case 'streaming_complete':
+            // 流式完成，恢复时间戳显示
+            isStreaming.value = false
+            if (currentStreamingMessage.value) {
+                currentStreamingMessage.value.timestamp = getCurrentTimestamp()
+                currentStreamingMessage.value = null
+            }
+            isSending.value = false
+            break
+            
         case 'answer':
             // 流式完成或直接回答，显示最终结果
             window.finishThinkingProcess()
@@ -256,10 +190,21 @@ const handleBackgroundResponse = (response: any) => {
             break
         
         case 'error':
-            // 显示错误信息
+            // 处理错误信息，支持不同类型的错误
             if (response.error) {
                 window.finishThinkingProcess()
-                window.addMessage('assistant', response.error, 'error')
+                
+                // 判断错误类型并调用相应的中断处理
+                const errorType = response.errorType || 'unknown'
+                const errorMessage = response.error
+                
+                // 处理流式传输中断
+                if (isStreaming.value) {
+                    handleStreamingInterrupt(errorType, errorMessage)
+                } else {
+                    // 非流式传输期间的错误
+                    window.addMessage('assistant', errorMessage, 'error')
+                }
             }
             isSending.value = false
             break
@@ -283,6 +228,63 @@ const handleBackgroundResponse = (response: any) => {
     }
 }
 
+// 处理流式内容的实时拼接
+const handleStreamingContent = (fullContent: string, isFirstChunk: boolean) => {
+    isStreaming.value = true
+    
+    if (isFirstChunk) {
+        // 首个数据块创建新的 assistant 对话窗口
+        currentStreamingMessage.value = {
+            id: generateId(),
+            type: 'assistant',
+            content: fullContent,
+            timestamp: '', // 流式传输期间不显示时间戳
+            status: 'success'
+        }
+        messages.push(currentStreamingMessage.value)
+    } else if (currentStreamingMessage.value) {
+        // 后续数据块在现有 assistant 窗口中追加新内容
+        currentStreamingMessage.value.content = fullContent
+    } else {
+        // 没有当前流式消息但收到非首个数据块
+        console.warn('收到非首个数据块但没有当前流式消息，创建新消息')
+        currentStreamingMessage.value = {
+            id: generateId(),
+            type: 'assistant',
+            content: fullContent,
+            timestamp: '',
+            status: 'success'
+        }
+        messages.push(currentStreamingMessage.value)
+    }
+    
+    // 自动滚动到最新内容
+    scrollToBottom()
+}
+
+// 处理流式传输中断
+const handleStreamingInterrupt = (errorType: string, errorMessage: string) => {
+    isStreaming.value = false
+    isSending.value = false
+    
+    if (currentStreamingMessage.value) {
+        // 如果有正在流式传输的消息，标记为错误状态
+        currentStreamingMessage.value.status = 'error'
+        currentStreamingMessage.value.timestamp = getCurrentTimestamp()
+        
+        // 添加错误信息到消息内容
+        const errorContent = `\n\n**生成中断**\n${errorMessage}\n\n*错误类型：${errorType}*`
+        currentStreamingMessage.value.content += errorContent
+        currentStreamingMessage.value = null
+    } else {
+        // 没有流式消息时，直接显示错误消息
+        window.addMessage('assistant', `生成过程中断：${errorMessage}`, 'error')
+    }
+    
+    // 显示错误提示
+    showPopupMessage(`AI 生成中断：${errorMessage}`, 'error')
+}
+
 // 滚动到底部函数
 const scrollToBottom = async () => {
     await nextTick()
@@ -295,7 +297,7 @@ const scrollToBottom = async () => {
 const copyToClipboard = async (content: string) => {
     try {
         if (!content || content.trim() === '') {
-            showCopyPopupMessage('没有可复制的内容')
+            showPopupMessage('没有可复制的内容', 'error')
             return
         }
         
@@ -313,20 +315,21 @@ const copyToClipboard = async (content: string) => {
         document.body.removeChild(textArea)
         
         if (successful) {
-            showCopyPopupMessage('内容已复制到剪贴板')
+            showPopupMessage('内容已复制到剪贴板', 'success')
         } else {
             throw new Error('复制命令执行失败')
         }
     } catch (error) {
         console.error('复制失败: ', error)
-        showCopyPopupMessage('复制失败，请手动复制')
+        showPopupMessage('复制失败，请手动复制', 'error')
     }
 }
 
-// 显示复制提示
-const showCopyPopupMessage = (message: string) => {
-    copyPopupMessage.value = message
-    showCopyPopup.value = true
+// 显示弹出提示
+const showPopupMessage = (message: string, type: 'success' | 'error' = 'success') => {
+    popupMessage.value = message
+    popupType.value = type
+    showPopup.value = true
     
     setTimeout(() => {
         const popupElement = document.querySelector('.popup') as HTMLElement
@@ -334,29 +337,21 @@ const showCopyPopupMessage = (message: string) => {
             popupElement.classList.add('hiding')
             
             setTimeout(() => {
-                showCopyPopup.value = false
-                copyPopupMessage.value = ''
+                showPopup.value = false
+                popupMessage.value = ''
+                popupType.value = 'success'
             }, 400)
         } else {
-            showCopyPopup.value = false
-            copyPopupMessage.value = ''
+            showPopup.value = false
+            popupMessage.value = ''
+            popupType.value = 'success'
         }
     }, 2500)
 }
 
-// 判断思考是否完成
-const isThinkingComplete = (message: Message): boolean => {
-    return message.completed === true
-}
-
-// 判断是否为新步骤
-const isNewStep = (stepId: number): boolean => {
-    return newStepIds.value.has(stepId)
-}
-
 // 消息点击处理
 const onMessageClick = (messageId: number) => {
-    // 可以在这里添加点击效果逻辑
+    // 在这里添加点击效果逻辑
     console.log(`Message ${messageId} clicked`)
 }
 
@@ -478,118 +473,32 @@ watch(messages, (newMessages) => {
 })
 
 // API 密钥相关方法
-const toggleApiKeyVisibility = () => {
-    showApiKey.value = !showApiKey.value
-    const input = document.getElementById('apiKey') as HTMLInputElement
-    if (input) {
-        input.type = showApiKey.value ? 'text' : 'password'
-    }
+const openApiKeySettings = async () => { showApiKeySettings.value = true }
+const closeApiKeySettings = () => { showApiKeySettings.value = false }
+const onApiKeySaved = () => {
+  showPopupMessage('API 密钥保存成功', 'success')
+  checkApiKeyStatus()
 }
-
-const loadApiKeyToInput = async () => {
-    try {
-        const response = await chrome.runtime.sendMessage({
-            type: 'GET_API_KEY'
-        })
-        
-        if (response && response.status === 'success' && response.apiKey) {
-            apiKeyInput.value = response.apiKey
-        }
-    } catch (error) {
-        console.error('加载 API 密钥失败: ', error)
-    }
-}
-
-const openApiKeySettings = async () => {
-    showApiKeySettings.value = true
-    // 等待 DOM 更新后再加载密钥
-    await nextTick()
-    await loadApiKeyToInput()
-}
-
-// 模态框关闭处理方法
-const onModalMouseDown = (event: MouseEvent) => {
-    mouseDownTarget.value = event.target
-}
-
-const onModalMouseUp = (event: MouseEvent) => {
-    // 检查鼠标按下和松开的目标是否相同，且是模态框背景
-    if (mouseDownTarget.value === event.currentTarget && 
-        event.target === event.currentTarget) {
-        closeModalWithAnimation()
-    }
-    mouseDownTarget.value = null
-}
-
-const onCloseButtonClick = (event: MouseEvent) => {
-    event.stopPropagation()
-    closeModalWithAnimation()
-}
-
-const closeModalWithAnimation = () => {
-    isClosingModal.value = true
-    setTimeout(() => {
-        showApiKeySettings.value = false
-        isClosingModal.value = false
-        apiKeyInput.value = ''
-    }, 300)
-}
-
-const saveApiKey = async () => {
-    if (!apiKeyInput.value || apiKeyInput.value.trim().length === 0) {
-        showCopyPopupMessage('请输入有效的 API 密钥')
-        return
-    }
-
-    try {
-        const response = await chrome.runtime.sendMessage({
-            type: 'SET_API_KEY',
-            apiKey: apiKeyInput.value.trim()
-        })
-        
-        // 检查响应状态
-        if (response && response.status === 'success') {
-            showCopyPopupMessage('API 密钥保存成功')
-            checkApiKeyStatus()
-        } else {
-            const errorMessage = response?.error || '未知错误'
-            showCopyPopupMessage(`保存失败: ${errorMessage}`)
-            console.error('保存失败详情: ', response)
-        }
-    } catch (error) {
-        console.error('保存 API 密钥失败: ', error)
-        showCopyPopupMessage('保存失败，请重试')
-    }
+const onApiKeyCleared = () => {
+  showPopupMessage('API 密钥已清空', 'success')
+  checkApiKeyStatus()
 }
 
 const checkApiKeyStatus = async () => {
-    try {
-        const response = await chrome.runtime.sendMessage({
-            type: 'GET_API_KEY'
-        })
-        
-        // 检查响应状态和字段
-        if (response && response.status === 'success') {
-            const newStatus = response.configured || false
-            // 如果状态发生变化，显示提示
-            if (isApiKeyConfigured.value !== newStatus) {
-                isApiKeyConfigured.value = newStatus
-            } else {
-                isApiKeyConfigured.value = newStatus
-            }
-            
-            // 如果有 API 密钥且设置界面打开，自动填入
-            if (response.apiKey && showApiKeySettings.value) {
-                apiKeyInput.value = response.apiKey
-            }
-        } else {
-            console.warn('检查 API 密钥状态失败: ', response)
-            isApiKeyConfigured.value = false
-        }
-    } catch (error) {
-        console.error('检查 API 密钥状态失败: ', error)
-        isApiKeyConfigured.value = false
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'GET_API_KEY'
+    })
+    
+    if (response && response.status === 'success') {
+      isApiKeyConfigured.value = response.configured || false
+    } else {
+      isApiKeyConfigured.value = false
     }
+  } catch (error) {
+    console.error('检查 API 密钥状态失败: ', error)
+    isApiKeyConfigured.value = false
+  }
 }
 
 onMounted(() => {
@@ -651,12 +560,10 @@ onMounted(() => {
     align-items: center;
     justify-content: center;
 }
-
 .settings-button:hover {
     background: rgba(255, 255, 255, 0.2);
     transform: scale(1.05);
 }
-
 .settings-icon {
     width: 24px;
     height: 24px;
@@ -686,182 +593,27 @@ onMounted(() => {
     min-height: 0;
 }
 
-.message {
-    margin-bottom: 16px;
-    padding: 12px 16px;
-    border-radius: 12px;
-    max-width: 75%;
-    position: relative;
-    transition: all 0.3s ease;
-    cursor: pointer;
-    overflow: hidden;
-    animation: slideIn 0.3s ease-out;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-.message:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-.message:active {
-    transform: translateY(0);
-    transition: all 0.1s ease;
-}
-
-/* 背景层 */
-.message-background {
-    position: absolute;
-    transition: all 0.3s ease;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 1;
-}
-
-/* 内容层 */
-.message-content-wrapper {
-    position: relative;
-    z-index: 2;
-}
-
-/* 用户消息基础样式 */
-.message.user {
-    color: white;
-    margin-left: auto;
-    box-shadow: 0 2px 8px rgba(0, 123, 255, 0.2);
-}
-.message.user .message-background {
-    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
-}
-.message.user:hover {
-    box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
-}
-.message.user:hover,
-.message.user:hover .message-background {
-    filter: brightness(0.85);
-}
-
-/* AI 助手消息基础样式 */
-.message.assistant { margin-right: auto; }
-.message.assistant.status-success { color: black; }
-.message.assistant.status-error { color: white; }
-
-.message.assistant.status-success .message-background { background: white; }
-
-.message.assistant.status-error { box-shadow: 0 2px 8px rgba(220, 53, 69, 0.2); }
-.message.assistant.status-error:hover { box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3); }
-.message.assistant.status-error .message-background {
-    background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
-}
-.message.assistant.status-error:hover,
-.message.assistant.status-error:hover .message-background {
-    filter: brightness(0.85);
-}
-
-/* 消息内容 */
-.message-content {
-    margin-bottom: 6px;
-    line-height: 1.4;
-    word-wrap: break-word;
-    font-size: 15px;
-    white-space: pre-line;
-}
-
-/* 消息底部容器 - 更紧凑 */
-.message-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 4px;
-    gap: 8px;
-}
-
-/* 复制按钮样式 */
-.copy-button {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 2px;
-    border-radius: 4px;
-    transition: all 0.2s ease;
+/* 加载指示器样式 */
+.loading-indicator {
     display: flex;
     align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-}
-
-.copy-button:hover {
-    background-color: rgba(200, 200, 200, 0.3);
-}
-
-.copy-button:hover .copy-icon {
-    filter: brightness(0.7);
-}
-
-.copy-icon {
-    width: 14px;
-    height: 14px;
-    transition: filter 0.2s ease;
-    opacity: 0.7;
-}
-
-/* 用户消息的复制按钮 */
-.message.user .copy-button {
-    background: none;
-    margin-left: auto;
-    margin-right: 0;
-}
-.message.user .copy-button:hover {
-    background: rgba(255, 255, 255, 0.1);
-}
-.message.user .copy-icon {
-    filter: brightness(0) invert(1);
-    opacity: 1;
-}
-.message.user .copy-button:hover .copy-icon {
-    filter: brightness(0) invert(1) brightness(1.2);
-}
-.message.assistant .copy-button {
-    margin-right: auto;
-    margin-left: -2px;
-}
-
-/* 时间戳样式 */
-.message-time {
+    gap: 6px;
     font-size: 11px;
-    opacity: 0.8;
-    font-weight: 500;
-    color: inherit;
-}
-
-/* 用户消息的时间戳 */
-.message.user .message-time {
-    color: rgba(255, 255, 255, 0.8);
-}
-
-/* 助手消息的时间戳 */
-.message.assistant .message-time {
     color: #666;
+    font-weight: 500;
+}
+.loading-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid #e0e0e0;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
 }
 
-/* 错误状态下的时间戳和复制按钮 */
-.message.assistant.status-error .message-time {
-    color: rgba(255, 255, 255, 0.9);
-}
-
-.message.assistant.status-error .copy-button:hover {
-    background-color: rgba(255, 255, 255, 0.2);
-}
-
-.message.assistant.status-error .copy-icon {
-    filter: brightness(0) invert(1);
-    opacity: 0.9;
-}
-
-.message.assistant.status-error .copy-button:hover .copy-icon {
-    filter: brightness(0) invert(1) brightness(1.2);
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
 .popup {
@@ -881,7 +633,24 @@ onMounted(() => {
     transition: all 0.4s ease;
     border: 1px solid #e9ecef;
 }
-
+.popup.success {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+    border: 1px solid #28a745;
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+}
+.popup.success:hover {
+    box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+}
+.popup.error {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    border: 1px solid #dc3545;
+    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
+}
+.popup.error:hover {
+    box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
+}
 .popup:hover {
     transform: translateX(-50%) translateY(-2px);
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
@@ -919,472 +688,9 @@ onMounted(() => {
     align-items: center;
     gap: 4px;
 }
-
-/* 输入区域 */
-.input-area {
-    padding: 16px;
-    border-top: 1px solid #e0e0e0;
-    background: white;
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
-    flex-shrink: 0;
-}
-
-.input-wrapper {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
-
-.message-input {
-    flex: 1;
-    padding: 12px 16px;
-    border: 2px solid #e9ecef;
-    border-radius: 25px;
-    font-size: 14px;
-    outline: none;
-    transition: all 0.3s ease;
-    background: #f8f9fa;
-    margin-bottom: 4px;
-}
-.message-input::placeholder {
-    user-select: none;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-}
-.message-input:focus {
-    border-color: #007bff;
-    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
-    background: white;
-}
-
-.send-button {
-    padding: 12px 20px;
-    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
-    color: white;
-    border: none;
-    border-radius: 25px;
-    cursor: pointer;
-    font-weight: 600;
-    transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
-    box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    flex-shrink: 0;
-    margin-top: 0;
-}
-
-.send-button.terminate-button {
-    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
-}
-
-.send-button.terminate-button:hover:not(:disabled) {
-    background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
-    box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
-}
-
-.send-icon {
-    width: 16px;
-    height: 16px;
-    object-fit: contain;
-    filter: brightness(0) invert(1);
-    transition: transform 0.3s ease, filter 0.3s ease;
-}
-
-.send-button:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0, 123, 255, 0.4);
-    background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
-}
-.send-button:hover:not(:disabled) .send-icon {
-    filter: brightness(0) invert(1) drop-shadow(0 0 2px rgba(255, 255, 255, 0.5));
-}
-
-.send-button:active:not(:disabled) {
-    transform: translateY(0);
-}
-.send-button:active:not(:disabled) .send-icon {
-    filter: brightness(0) invert(1) drop-shadow(0 0 4px rgba(255, 255, 255, 0.8));
-}
-
-.send-button:disabled {
-    background: #6c757d;
-    cursor: not-allowed;
-    box-shadow: none;
-    transform: none;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-.send-button:disabled .send-icon {
-    filter: brightness(0) invert(0.7) grayscale(0.8);
-    opacity: 0.8;
-}
-
-.send-button:disabled span {
-    color: rgba(255, 255, 255, 0.6);
-    text-shadow: none;
-}
-.send-button:not(:disabled) span {
-    transition: color 0.3s ease, text-shadow 0.3s ease;
-}
-.send-button:hover:not(:disabled) span {
-    color: #ffffff;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-.send-button:active:not(:disabled) span {
-    color: #f0f0f0;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
-}
-
 .messages {
     scrollbar-width: thin;
     scrollbar-color: #c1c1c1 #f1f1f1;
 }
 
-/* 思考状态 */
-.message.thinking {
-    color: #333;
-    margin-right: auto;
-    padding: 12px 16px;
-    border-radius: 0;
-    box-shadow: none;
-    background: transparent;
-    cursor: default;
-    transition: none;
-    transform: none;
-    width: 100%;
-    margin-bottom: 0;
-}
-
-.message.thinking .message-background {
-    background: transparent;
-    box-shadow: none;
-    padding: 0;
-}
-
-.message.thinking:hover,
-.message.thinking:hover .message-background {
-    transform: none;
-    box-shadow: none;
-    filter: none;
-}
-.message.thinking:active { transform: none; }
-
-/* 思考内容样式 */
-.thinking-content {
-    width: 100%;
-    color: #9ca3af;
-    font-size: 13px;
-    line-height: 2.2;
-    transition: all 0.3s ease;
-}
-
-/* 思考步骤样式 */
-.thinking-steps {
-    position: relative;
-    padding-left: 0;
-    transition: all 0.3s ease;
-}
-
-.thinking-step {
-    position: relative;
-    margin-bottom: -4px;
-    opacity: 1;
-    transform: translateY(0);
-    transition: all 0.3s ease;
-    max-height: 200px;
-    overflow: hidden;
-}
-
-.step-content {
-    font-size: 13px;
-    white-space: pre-line;
-    word-wrap: break-word;
-    transform: translateY(-4px);
-}
-
-.new-step {
-    animation: slideIn 0.3s ease-out;
-}
-
-@keyframes slideIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-/* 思考进度指示器 */
-.thinking-progress {
-    margin-top: 8px;
-    margin-left: -8px;
-    padding: 4px 0 4px 8px;
-    background-color: #f9fafb;
-    border-radius: 4px;
-    font-size: 11px;
-    color: #9ca3af;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.progress-dots {
-    display: flex;
-    gap: 2px;
-}
-
-.progress-dot {
-    width: 4px;
-    height: 4px;
-    background-color: #e5e7eb;
-    border-radius: 50%;
-    animation: pulse 1.5s infinite;
-}
-
-.progress-dot:nth-child(2) {
-    animation-delay: 0.3s;
-}
-
-.progress-dot:nth-child(3) {
-    animation-delay: 0.6s;
-}
-
-@keyframes pulse {
-    0%, 100% {
-        opacity: 0.3;
-        transform: scale(0.8);
-    }
-    50% {
-        opacity: 1;
-        transform: scale(1);
-    }
-}
-
-/* 设置模态框样式 */
-.settings-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-}
-
-.settings-modal:not(.modal-closing) {
-    animation: fadeIn 0.3s ease-out forwards;
-}
-
-.settings-modal.modal-closing {
-    animation: fadeOut 0.3s ease-in forwards;
-}
-
-@keyframes fadeIn {
-    from {
-        background: rgba(0, 0, 0, 0);
-    }
-    to {
-        background: rgba(0, 0, 0, 0.5);
-    }
-}
-
-@keyframes fadeOut {
-    from {
-        background: rgba(0, 0, 0, 0.5);
-    }
-    to {
-        background: rgba(0, 0, 0, 0);
-    }
-}
-
-.settings-content {
-    background: white;
-    border-radius: 12px;
-    width: 90%;
-    max-width: 500px;
-    max-height: 80vh;
-    overflow: hidden;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
-}
-.settings-content:not(.content-closing) {
-    animation: bounceIn 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
-}
-.settings-content.content-closing {
-    animation: bounceOut 0.35s ease-in forwards;
-}
-
-@keyframes bounceIn {
-  0% {
-    opacity: 0;
-    transform: scale(0.5);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes bounceOut {
-  0% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(0.5);
-  }
-}
-
-.settings-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 20px 24px;
-    border-bottom: 1px solid #e0e0e0;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-}
-.settings-header h3 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 600;
-}
-
-.close-button {
-    background: none;
-    border: none;
-    color: white;
-    font-size: 24px;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 4px;
-    transition: background 0.2s ease;
-    line-height: 1;
-}
-.close-button:hover { background: rgba(255, 255, 255, 0.2); }
-
-.settings-body { padding: 24px; }
-.api-key-section { margin-bottom: 24px; }
-.api-key-section label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 600;
-    color: #333;
-    font-size: 14px;
-}
-
-.input-group {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 12px;
-}
-
-.api-key-input {
-    flex: 1;
-    padding: 12px 16px;
-    border: 2px solid #e9ecef;
-    border-radius: 8px;
-    font-size: 14px;
-    outline: none;
-    transition: all 0.3s ease;
-    background: #f8f9fa;
-}
-
-.api-key-input:focus {
-    border-color: #007bff;
-    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
-    background: white;
-}
-
-.toggle-visibility {
-    background: #f8f9fa;
-    border: 2px solid #e9ecef;
-    border-radius: 8px;
-    padding: 8px 12px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.toggle-visibility:hover {
-    background: #e9ecef;
-    border-color: #dee2e6;
-}
-
-.toggle-icon {
-    width: 20px;
-    height: 20px;
-    filter: brightness(0) invert(0.5);
-}
-
-.settings-actions {
-    display: flex;
-    gap: 12px;
-    justify-content: flex-end;
-}
-
-.save-button {
-    padding: 12px 20px;
-    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
-    color: white;
-    border: none;
-    border-radius: 25px;
-    cursor: pointer;
-    font-weight: 600;
-    transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
-    box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    flex-shrink: 0;
-    margin-top: 0;
-}
-
-.save-button:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0, 123, 255, 0.4);
-    background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
-}
-
-.save-button:active:not(:disabled) {
-    transform: translateY(0);
-}
-
-.save-button:disabled {
-    background: #6c757d;
-    cursor: not-allowed;
-    box-shadow: none;
-    transform: none;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.save-button:disabled span {
-    color: rgba(255, 255, 255, 0.6);
-    text-shadow: none;
-}
-.save-button:not(:disabled) span {
-    transition: color 0.3s ease, text-shadow 0.3s ease;
-}
-.save-button:hover:not(:disabled) span {
-    color: #ffffff;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-.save-button:active:not(:disabled) span {
-    color: #f0f0f0;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
-}
 </style>
