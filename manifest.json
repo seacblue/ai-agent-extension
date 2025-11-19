@@ -13,7 +13,8 @@
     "permissions": [
         "activeTab",
         "storage",
-        "scripting"
+        "scripting",
+        "tabs"
     ],
 
     "host_permissions": [
@@ -32,9 +33,14 @@
         {
             "matches": ["<all_urls>"],
             "js": ["content.js"],
-            "run_at": "document_end"
+            "run_at": "document_end",
+            "all_frames": false
         }
     ],
+
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://ark.cn-beijing.volces.com/ https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+    },
 
     "web_accessible_resources": [
         {

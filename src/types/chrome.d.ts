@@ -21,6 +21,11 @@ declare global {
           }
         }
       }
+      
+      namespace inspectedWindow {
+        const tabId: number
+        function eval(expression: string, callback?: (result: any, exceptionInfo: any) => void): void
+      }
     }
     
     namespace runtime {

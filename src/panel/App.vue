@@ -90,6 +90,26 @@ const isApiKeyConfigured = ref(false)
 // 流式内容处理相关
 const currentStreamingMessage = ref<Message | null>(null)
 const isStreaming = ref(false)
+const accumulatedContent = ref('') // 用于累积流式内容
+
+// 在组件挂载时设置长连接监听
+onMounted(() => {
+    // 监听来自 Background 的长连接
+    chrome.runtime.onConnect.addListener((port) => {
+        if (port.name === 'question-response') {
+            console.log('Panel 收到 Background 长连接')
+            
+            port.onMessage.addListener((message) => {
+                console.log('Panel 收到长连接消息: ', message)
+                handleBackgroundResponse(message)
+            })
+            
+            port.onDisconnect.addListener(() => {
+                console.log('Panel 长连接已断开')
+            })
+        }
+    })
+})
 
 const sendMessage = async () => {
     if (!messageInputRef.value?.getInputText().trim()) return
@@ -117,9 +137,23 @@ const sendMessage = async () => {
     
     // 发送消息到 Background Script
     try {
+        // 尝试获取当前标签页信息
+        let tabId = null
+        
+        try {
+            // 在 DevTools 中，我们需要通过 chrome.devtools.inspectedWindow 获取标签页 ID
+            if (chrome.devtools && chrome.devtools.inspectedWindow) {
+                tabId = chrome.devtools.inspectedWindow.tabId
+                console.log('从 DevTools 获取到标签页 ID:', tabId)
+            }
+        } catch (devtoolsError) {
+            console.warn('无法从 DevTools 获取标签页 ID:', devtoolsError)
+        }
+        
         const response = await chrome.runtime.sendMessage({
             type: 'ASK_QUESTION',
-            question
+            question,
+            tabId  // 传递标签页 ID
         })
         // 处理响应
         handleBackgroundResponse(response)
@@ -176,7 +210,11 @@ const handleBackgroundResponse = (response: any) => {
                 currentStreamingMessage.value.timestamp = getCurrentTimestamp()
                 currentStreamingMessage.value = null
             }
+            accumulatedContent.value = '' // 重置累积内容
             isSending.value = false
+            
+            // 流式完成后滚动到底部
+            scrollToBottom()
             break
             
         case 'answer':
@@ -229,37 +267,43 @@ const handleBackgroundResponse = (response: any) => {
 }
 
 // 处理流式内容的实时拼接
-const handleStreamingContent = (fullContent: string, isFirstChunk: boolean) => {
+const handleStreamingContent = (chunk: string, isFirstChunk: boolean) => {
     isStreaming.value = true
     
     if (isFirstChunk) {
-        // 首个数据块创建新的 assistant 对话窗口
+        window.finishThinkingProcess()
+        
+        // 重置累积内容并创建新的 assistant 消息
+        accumulatedContent.value = chunk
+        
         currentStreamingMessage.value = {
             id: generateId(),
             type: 'assistant',
-            content: fullContent,
+            content: accumulatedContent.value,
             timestamp: '', // 流式传输期间不显示时间戳
             status: 'success'
         }
         messages.push(currentStreamingMessage.value)
     } else if (currentStreamingMessage.value) {
-        // 后续数据块在现有 assistant 窗口中追加新内容
-        currentStreamingMessage.value.content = fullContent
+        // 后续数据块，累积内容并更新消息
+        accumulatedContent.value += chunk
+        currentStreamingMessage.value.content = accumulatedContent.value
     } else {
-        // 没有当前流式消息但收到非首个数据块
-        console.warn('收到非首个数据块但没有当前流式消息，创建新消息')
+        // 没有当前流式消息但收到非首个数据块，重新初始化
+        console.warn('收到非首个数据块但没有当前流式消息，重新初始化')
+        accumulatedContent.value = chunk
+        
         currentStreamingMessage.value = {
             id: generateId(),
             type: 'assistant',
-            content: fullContent,
+            content: accumulatedContent.value,
             timestamp: '',
             status: 'success'
         }
         messages.push(currentStreamingMessage.value)
     }
     
-    // 自动滚动到最新内容
-    scrollToBottom()
+    // 移除流式生成过程中的自动滚动，只在完成后滚动
 }
 
 // 处理流式传输中断
@@ -455,8 +499,8 @@ window.addMessage = (type: 'user' | 'assistant', content: string, status: 'succe
     }
     messages.push(message)
     
-    // 只对 assistant 消息自动滚动
-    if (type === 'assistant') {
+    // 只对非流式传输期间的 assistant 消息自动滚动
+    if (type === 'assistant' && !isStreaming.value) {
         scrollToBottom()
     }
     
@@ -466,7 +510,8 @@ window.addMessage = (type: 'user' | 'assistant', content: string, status: 'succe
 watch(messages, (newMessages) => {
     if (newMessages.length > 0) {
         const latestMessage = newMessages[newMessages.length - 1]
-        if (latestMessage.type === 'assistant') {
+        // 只在非流式传输期间且最新消息是 assistant 类型时滚动
+        if (latestMessage.type === 'assistant' && !isStreaming.value) {
             scrollToBottom()
         }
     }

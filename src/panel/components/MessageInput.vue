@@ -48,11 +48,11 @@ const handleInput = () => {
   })
 }
 
-// 处理键盘事件：Enter 发送，Ctrl+Enter 换行
+// 处理键盘事件：Enter 发送，Shift+Enter 换行
 const handleKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'Enter') {
-    if (event.ctrlKey || event.metaKey) {
-      // Ctrl+Enter 或 Cmd+Enter 换行
+    if (event.shiftKey) {
+      // Shift+Enter 换行
       event.preventDefault()
       const textarea = event.target as HTMLTextAreaElement
       const start = textarea.selectionStart
@@ -83,77 +83,81 @@ const adjustTextareaHeight = () => {
   const inputArea = inputWrapper?.parentElement as HTMLElement
   if (!textarea || !inputWrapper || !inputArea) return
   
+  // 获取 CSS 变量值
+  const rootStyles = getComputedStyle(document.documentElement)
+  const minHeight = parseInt(rootStyles.getPropertyValue('--textarea-min-height')) || 36
+  const maxHeight = parseInt(rootStyles.getPropertyValue('--textarea-max-height')) || 96
+  const sendButtonHeight = parseInt(rootStyles.getPropertyValue('--send-button-height')) || 44
+  const inputAreaPadding = parseInt(rootStyles.getPropertyValue('--input-area-padding')) || 32
+  const cursorBuffer = parseInt(rootStyles.getPropertyValue('--cursor-scroll-buffer')) || 30
+  
+  // 调试信息
+  console.log('CSS Variables:', {
+    minHeight,
+    maxHeight,
+    sendButtonHeight,
+    inputAreaPadding,
+    cursorBuffer
+  })
+  
   // 保存当前滚动位置和光标位置
   const scrollTop = textarea.scrollTop
   const cursorPosition = textarea.selectionStart
   textarea.style.height = 'auto'
   
-  // 计算实际需要的行数
-  const singleLineHeight = 20
-  const padding = 24
-  const minHeight = 36
-  const maxHeight = 96
-  
-  const contentHeight = textarea.scrollHeight - padding
-  const actualLines = Math.ceil(contentHeight / singleLineHeight)
-  let targetHeight = Math.min(Math.max(actualLines * singleLineHeight + padding, minHeight), maxHeight)
-  
-  // 如果达到最大高度，为文本预留上下边距
+  const naturalHeight = textarea.scrollHeight
+  const targetHeight = Math.min(Math.max(naturalHeight, minHeight), maxHeight)
   if (targetHeight >= maxHeight) {
-    // 确保有足够的上下padding，避免文本紧贴边框
-    targetHeight = maxHeight
-    textarea.style.paddingTop = '12px'
-    textarea.style.paddingBottom = '12px'
+    textarea.classList.add('max-height')
   } else {
-    // 恢复原始padding
-    textarea.style.paddingTop = '12px'
-    textarea.style.paddingBottom = '12px'
+    textarea.classList.remove('max-height')
   }
   
   // 计算容器高度
-  const sendButtonHeight = 44
   const wrapperHeight = Math.max(sendButtonHeight, targetHeight)
-  const areaHeight = wrapperHeight + 32
+  const areaHeight = wrapperHeight + inputAreaPadding
 
   textarea.style.height = `${targetHeight}px`
-  
-  requestAnimationFrame(() => {
-    // 创建临时元素来精确计算光标位置
-    const temp = document.createElement('div')
-    const style = getComputedStyle(textarea)
-    temp.style.cssText = `
-      position: absolute;
-      visibility: hidden;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      font-family: ${style.fontFamily};
-      font-size: ${style.fontSize};
-      line-height: ${style.lineHeight};
-      padding: ${style.paddingTop} ${style.paddingRight} ${style.paddingBottom} ${style.paddingLeft};
-      width: ${textarea.clientWidth}px;
-    `
-    
-    // 设置文本内容到光标位置
-    temp.textContent = inputText.value.substring(0, cursorPosition)
-    document.body.appendChild(temp)
-    
-    const cursorHeight = temp.offsetHeight
-    document.body.removeChild(temp)
-    
-    // 计算需要的滚动位置
-    const visibleHeight = textarea.clientHeight
-    const targetScrollTop = Math.max(0, cursorHeight - visibleHeight + 30) // 30px缓冲
-    
-    // 只有当需要滚动时才更新滚动位置
-    if (cursorHeight > scrollTop + visibleHeight - 30) {
-      textarea.scrollTop = targetScrollTop
-    } else {
-      textarea.scrollTop = scrollTop
-    }
-  })
-  
   inputWrapper.style.height = `${wrapperHeight}px`
   inputArea.style.height = `${areaHeight}px`
+  
+  // 优化光标位置计算，只在需要时创建临时元素
+  if (textarea.scrollHeight > textarea.clientHeight && cursorPosition > 0) {
+    requestAnimationFrame(() => {
+      // 创建临时元素来精确计算光标位置
+      const temp = document.createElement('div')
+      const style = getComputedStyle(textarea)
+      temp.style.cssText = `
+        position: absolute;
+        visibility: hidden;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: ${style.fontFamily};
+        font-size: ${style.fontSize};
+        line-height: ${style.lineHeight};
+        padding: ${style.paddingTop} ${style.paddingRight} ${style.paddingBottom} ${style.paddingLeft};
+        width: ${textarea.clientWidth}px;
+      `
+      
+      // 设置文本内容到光标位置
+      temp.textContent = inputText.value.substring(0, cursorPosition)
+      document.body.appendChild(temp)
+      
+      const cursorHeight = temp.offsetHeight
+      document.body.removeChild(temp)
+      
+      // 计算需要的滚动位置
+      const visibleHeight = textarea.clientHeight
+      const targetScrollTop = Math.max(0, cursorHeight - visibleHeight + cursorBuffer)
+      
+      // 只有当需要滚动时才更新滚动位置
+      if (cursorHeight > scrollTop + visibleHeight - cursorBuffer) {
+        textarea.scrollTop = targetScrollTop
+      } else {
+        textarea.scrollTop = scrollTop
+      }
+    })
+  }
 }
 
 // 清空输入框
@@ -173,6 +177,15 @@ onMounted(() => { adjustTextareaHeight() })
 </script>
 
 <style scoped>
+/* CSS 变量定义 */
+:root {
+  --textarea-min-height: 36px;
+  --textarea-max-height: 96px;
+  --send-button-height: 44px;
+  --input-area-padding: 32px;
+  --cursor-scroll-buffer: 30px;
+}
+
 /* 输入区域 */
 .input-area {
   padding: 16px;
@@ -204,8 +217,8 @@ onMounted(() => { adjustTextareaHeight() })
   transition: border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
   background: #f8f9fa;
   margin-bottom: 0;
-  min-height: 36px;
-  max-height: 96px;
+  min-height: var(--textarea-min-height);
+  max-height: var(--textarea-max-height);
   overflow-y: auto;
   overflow-x: hidden;
   font-family: inherit;
@@ -216,6 +229,11 @@ onMounted(() => { adjustTextareaHeight() })
   display: block;
   width: 100%;
   box-sizing: border-box;
+}
+
+.message-input.max-height {
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
 
 .message-input::-webkit-scrollbar {
@@ -254,7 +272,7 @@ onMounted(() => { adjustTextareaHeight() })
   margin-top: 0;
   position: relative;
   overflow: hidden;
-  height: 44px;
+  height: var(--send-button-height);
   min-width: 80px;
 }
 

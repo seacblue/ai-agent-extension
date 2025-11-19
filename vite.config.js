@@ -56,11 +56,13 @@ export default defineConfig({
       output: {
         entryFileNames: '[name].js',
         chunkFileNames: '[name].js',
-        assetFileNames: '[name].[ext]'
+        assetFileNames: '[name].[ext]',
+        manualChunks: undefined
       },
       treeshake: 'smallest'
     },
     outDir: 'dist',
     emptyOutDir: true,
+    target: 'es2020' // 设置目标环境
   }
 })
