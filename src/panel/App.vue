@@ -92,6 +92,9 @@ const currentStreamingMessage = ref<Message | null>(null)
 const isStreaming = ref(false)
 const accumulatedContent = ref('') // 用于累积流式内容
 
+// 请求管理相关
+const currentRequestId = ref<string | null>(null)
+
 // 在组件挂载时设置长连接监听
 onMounted(() => {
     // 监听来自 Background 的长连接
@@ -116,6 +119,22 @@ const sendMessage = async () => {
     
     isSending.value = true
     
+    // 如果有之前的请求，先取消它
+    if (currentRequestId.value) {
+        try {
+            await chrome.runtime.sendMessage({
+                type: 'TERMINATE_PROCESS',
+                requestId: currentRequestId.value
+            })
+        } catch (error) {
+            console.warn('取消之前请求失败: ', error)
+        }
+    }
+    
+    // 生成新的请求 ID
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    currentRequestId.value = requestId
+    
     // 获取输入框内容并清空
     const userInputText = messageInputRef.value.getInputText()
     messageInputRef.value.clearInput()
@@ -135,6 +154,18 @@ const sendMessage = async () => {
     const question = userInputText
     await scrollToBottom()
     
+    const thinkingMessage: Message = {
+        id: generateId(),
+        type: 'thinking',
+        content: '',
+        timestamp: getCurrentTimestamp(),
+        status: 'success',
+        completed: false,
+        thinkingSteps: []
+    }
+    messages.push(thinkingMessage)
+    await scrollToBottom()
+    
     // 发送消息到 Background Script
     try {
         // 尝试获取当前标签页信息
@@ -144,23 +175,32 @@ const sendMessage = async () => {
             // 在 DevTools 中，我们需要通过 chrome.devtools.inspectedWindow 获取标签页 ID
             if (chrome.devtools && chrome.devtools.inspectedWindow) {
                 tabId = chrome.devtools.inspectedWindow.tabId
-                console.log('从 DevTools 获取到标签页 ID:', tabId)
+                console.log('从 DevTools 获取到标签页 ID: ', tabId)
             }
         } catch (devtoolsError) {
-            console.warn('无法从 DevTools 获取标签页 ID:', devtoolsError)
+            console.warn('无法从 DevTools 获取标签页 ID: ', devtoolsError)
         }
         
         const response = await chrome.runtime.sendMessage({
             type: 'ASK_QUESTION',
             question,
-            tabId  // 传递标签页 ID
+            tabId,  // 传递标签页 ID
+            requestId  // 传递请求 ID
         })
-        // 处理响应
-        handleBackgroundResponse(response)
+        
+        // 检查响应是否匹配当前请求 ID
+        if (response && response.requestId === currentRequestId.value) {
+            handleBackgroundResponse(response)
+        } else {
+            console.log('忽略过期请求的响应:', response)
+        }
         
     } catch (error) {
-        window.addMessage('assistant', '抱歉，处理您的问题时遇到了错误，请稍后再试。', 'error')
+        window.finishThinkingProcess()
+        console.error('发送消息失败: ', error)
+        // window.addMessage('assistant', '抱歉，处理您的问题时遇到了错误，请稍后再试。', 'error')
         isSending.value = false
+        currentRequestId.value = null
     }
     
     await scrollToBottom()
@@ -169,6 +209,7 @@ const sendMessage = async () => {
 const terminateMessage = async () => {
     isSending.value = false
     window.finishThinkingProcess()
+    currentRequestId.value = null // 清理请求 ID
     
     // 向 Background 发送终止消息
     try {
@@ -183,13 +224,16 @@ const terminateMessage = async () => {
 // 统一处理后台响应
 const handleBackgroundResponse = (response: any) => {
     if (!response) {
+        window.finishThinkingProcess()
         window.addMessage('assistant', '未收到有效响应', 'error')
         isSending.value = false
+        currentRequestId.value = null
         return
     }
 
     switch (response.type) {
         case 'thinking':
+            window.finishThinkingProcess()
             // 显示思考过程
             if (response.content) {
                 window.addThinkingMessage(response.content)
@@ -212,6 +256,7 @@ const handleBackgroundResponse = (response: any) => {
             }
             accumulatedContent.value = '' // 重置累积内容
             isSending.value = false
+            currentRequestId.value = null // 清理请求 ID
             
             // 流式完成后滚动到底部
             scrollToBottom()
@@ -225,6 +270,7 @@ const handleBackgroundResponse = (response: any) => {
                 window.addMessage('assistant', finalAnswer, 'success')
             }
             isSending.value = false
+            currentRequestId.value = null // 清理请求 ID
             break
         
         case 'error':
@@ -233,18 +279,18 @@ const handleBackgroundResponse = (response: any) => {
                 window.finishThinkingProcess()
                 
                 // 判断错误类型并调用相应的中断处理
-                const errorType = response.errorType || 'unknown'
                 const errorMessage = response.error
                 
                 // 处理流式传输中断
                 if (isStreaming.value) {
-                    handleStreamingInterrupt(errorType, errorMessage)
+                    handleStreamingInterrupt()
                 } else {
                     // 非流式传输期间的错误
                     window.addMessage('assistant', errorMessage, 'error')
                 }
             }
             isSending.value = false
+            currentRequestId.value = null // 清理请求 ID
             break
             
         case 'started':
@@ -253,6 +299,7 @@ const handleBackgroundResponse = (response: any) => {
             
         default:
             // 兼容旧格式，统一处理
+            window.finishThinkingProcess()
             const content = response.answer || response.content || response.error
             if (content) {
                 const status = response.error ? 'error' : 'success'
@@ -263,6 +310,7 @@ const handleBackgroundResponse = (response: any) => {
                 window.addMessage('assistant', '收到未知格式的响应', 'error')
             }
             isSending.value = false
+            currentRequestId.value = null // 清理请求 ID
     }
 }
 
@@ -307,26 +355,15 @@ const handleStreamingContent = (chunk: string, isFirstChunk: boolean) => {
 }
 
 // 处理流式传输中断
-const handleStreamingInterrupt = (errorType: string, errorMessage: string) => {
+const handleStreamingInterrupt = () => {
     isStreaming.value = false
     isSending.value = false
     
     if (currentStreamingMessage.value) {
-        // 如果有正在流式传输的消息，标记为错误状态
-        currentStreamingMessage.value.status = 'error'
         currentStreamingMessage.value.timestamp = getCurrentTimestamp()
         
-        // 添加错误信息到消息内容
-        const errorContent = `\n\n**生成中断**\n${errorMessage}\n\n*错误类型：${errorType}*`
-        currentStreamingMessage.value.content += errorContent
         currentStreamingMessage.value = null
-    } else {
-        // 没有流式消息时，直接显示错误消息
-        window.addMessage('assistant', `生成过程中断：${errorMessage}`, 'error')
     }
-    
-    // 显示错误提示
-    showPopupMessage(`AI 生成中断：${errorMessage}`, 'error')
 }
 
 // 滚动到底部函数
@@ -441,7 +478,7 @@ window.addThinkingMessage = (content: string) => {
         timestamp: getCurrentTimestamp()
     }
     
-    if (shouldMergeThinking() || !config.enableThinkingMerge) {
+    if (shouldMergeThinking() && config.enableThinkingMerge) {
         const lastThinking = messages[messages.length - 1]
         if (!lastThinking.thinkingSteps) {
             lastThinking.thinkingSteps = []
@@ -457,7 +494,6 @@ window.addThinkingMessage = (content: string) => {
                 }, 300)
             })
         })
-        
         return lastThinking.id
     }
     
@@ -481,12 +517,12 @@ window.finishThinkingProcess = () => {
     
     const lastMessage = messages[messages.length - 1]
     if (lastMessage.type === 'thinking' && lastMessage.completed !== true) {
-        lastMessage.completed = true
+        if (!lastMessage.thinkingSteps || lastMessage.thinkingSteps.length === 0) {
+            messages.pop()
+        } else {
+            lastMessage.completed = true
+        }
     }
-}
-
-window.updateThinkingConfig = (newConfig: Partial<typeof config>) => {
-    Object.assign(config, newConfig)
 }
 
 window.addMessage = (type: 'user' | 'assistant', content: string, status: 'success' | 'error' = 'success') => {
@@ -521,29 +557,29 @@ watch(messages, (newMessages) => {
 const openApiKeySettings = async () => { showApiKeySettings.value = true }
 const closeApiKeySettings = () => { showApiKeySettings.value = false }
 const onApiKeySaved = () => {
-  showPopupMessage('API 密钥保存成功', 'success')
-  checkApiKeyStatus()
+    showPopupMessage('API 密钥保存成功', 'success')
+    checkApiKeyStatus()
 }
 const onApiKeyCleared = () => {
-  showPopupMessage('API 密钥已清空', 'success')
-  checkApiKeyStatus()
+    showPopupMessage('API 密钥已清空', 'success')
+    checkApiKeyStatus()
 }
 
 const checkApiKeyStatus = async () => {
-  try {
-    const response = await chrome.runtime.sendMessage({
-      type: 'GET_API_KEY'
-    })
-    
-    if (response && response.status === 'success') {
-      isApiKeyConfigured.value = response.configured || false
-    } else {
-      isApiKeyConfigured.value = false
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: 'GET_API_KEY'
+        })
+        
+        if (response && response.status === 'success') {
+            isApiKeyConfigured.value = response.configured || false
+        } else {
+            isApiKeyConfigured.value = false
+        }
+    } catch (error) {
+        console.error('检查 API 密钥状态失败: ', error)
+        isApiKeyConfigured.value = false
     }
-  } catch (error) {
-    console.error('检查 API 密钥状态失败: ', error)
-    isApiKeyConfigured.value = false
-  }
 }
 
 onMounted(() => {

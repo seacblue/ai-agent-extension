@@ -88,7 +88,8 @@ export class DoubaoAIClient {
     messages: ChatMessage[],
     onChunk: (chunk: string) => void,
     onComplete: () => void,
-    onError: (error: Error) => void
+    onError: (error: Error) => void,
+    abortSignal?: AbortSignal
   ): Promise<void> {
     const request: ChatCompletionRequest = {
       model: this.model,
@@ -106,6 +107,7 @@ export class DoubaoAIClient {
           'Authorization': `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify(request),
+        signal: abortSignal,
       });
 
       if (!response.ok) {
@@ -122,6 +124,11 @@ export class DoubaoAIClient {
       let buffer = '';
 
       while (true) {
+        // 检查是否被中断
+        if (abortSignal?.aborted) {
+          throw new Error('请求被用户中断');
+        }
+
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -130,6 +137,11 @@ export class DoubaoAIClient {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
+          // 检查是否被中断
+          if (abortSignal?.aborted) {
+            throw new Error('请求被用户中断');
+          }
+
           if (line.trim() === '') continue;
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
@@ -153,8 +165,13 @@ export class DoubaoAIClient {
 
       onComplete();
     } catch (error) {
-      console.error('豆包 AI 流式 API 调用失败: ', error);
-      onError(error as Error);
+      if (abortSignal?.aborted) {
+        console.log('AI 流式请求被中断');
+        onError(new Error('请求被用户中断'));
+      } else {
+        console.error('豆包 AI 流式 API 调用失败: ', error);
+        onError(error as Error);
+      }
     }
   }
 }

@@ -5,6 +5,7 @@ import { getApiKeyFromStorage, saveApiKey } from '../config/api'
 // 存储当前活跃的定时器和 AI 客户端
 let activeTimers: NodeJS.Timeout[] = []
 let currentAIProcess: { abort: () => void } | null = null
+let currentAbortController: AbortController | null = null
 
 // 监听来自 DevTools Panel 和 Content Script 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -149,8 +150,15 @@ function handleTerminate(sendResponse: (response: any) => void) {
             currentAIProcess = null
         }
         
+        // 中断当前的 AI 流式请求
+        if (currentAbortController) {
+            currentAbortController.abort()
+            currentAbortController = null
+        }
+        
         // 清空定时器数组
         activeTimers = []
+        
         sendResponse({
             type: 'terminated',
             message: '所有任务已终止',
@@ -276,6 +284,9 @@ async function handleQuestion(question: string, sender: chrome.runtime.MessageSe
                         }
                         const aiClient = new DoubaoAIClient(apiKey)
                         
+                        // 创建 AbortController 用于中断请求
+                        currentAbortController = new AbortController()
+                        
                         // 使用流式 API
                         let isFirstChunk = true
                         await aiClient.sendMessageStream(
@@ -294,6 +305,7 @@ async function handleQuestion(question: string, sender: chrome.runtime.MessageSe
                             },
                             // onComplete - 流式完成
                             () => {
+                                currentAbortController = null
                                 panelPort.postMessage({
                                     type: 'streaming_complete'
                                 })
@@ -301,13 +313,16 @@ async function handleQuestion(question: string, sender: chrome.runtime.MessageSe
                             },
                             // onError - 错误处理
                             (error: Error) => {
+                                currentAbortController = null
                                 console.error('流式 API 调用失败: ', error)
                                 panelPort.postMessage({
                                     type: 'error',
                                     error: 'AI 生成失败: ' + error.message
                                 })
                                 panelPort.disconnect()
-                            }
+                            },
+                            // abortSignal - 中断信号
+                            currentAbortController.signal
                         )
                     } catch (detailedError) {
                         console.error('获取详细数据时出错: ', detailedError)
@@ -344,6 +359,9 @@ async function handleQuestion(question: string, sender: chrome.runtime.MessageSe
                 const apiKey = await getApiKeyFromStorage()
                 const aiClient = new DoubaoAIClient(apiKey)
                 
+                // 创建 AbortController 用于中断请求
+                currentAbortController = new AbortController()
+                
                 const normalChatPrompt = `
 你是一个专业的 AI 开发者助手，擅长回答各种技术问题。
 
@@ -379,18 +397,22 @@ async function handleQuestion(question: string, sender: chrome.runtime.MessageSe
                     },
                     // onComplete - 流式完成
                     () => {
+                        currentAbortController = null
                         panelPort.postMessage({ type: 'streaming_complete' })
                         panelPort.disconnect()
                     },
                     // onError - 错误处理
                     (error: Error) => {
+                        currentAbortController = null
                         console.error('流式 API 调用失败: ', error)
                         panelPort.postMessage({
                             type: 'error',
                             error: 'AI 生成失败: ' + error.message
                         })
                         panelPort.disconnect()
-                    }
+                    },
+                    // abortSignal - 中断信号
+                    currentAbortController.signal
                 )
             } catch (error) {
                 console.error('处理正常对话时出错: ', error)
@@ -502,7 +524,26 @@ function containsDOMKeywords(question: string): boolean {
 // 智能判断是否需要 DOM 分析
 async function shouldUseDOMAnalysis(question: string): Promise<{ shouldAnalyze: boolean; reasoning: string }> {
     try {
+        // 使用关键词匹配作为快速判断
+        const keywords = ['dom', 'html', '结构', '页面', '元素', '标签', '语义化'];
+        const lowerQuestion = question.toLowerCase();
+        const hasKeyword = keywords.some(keyword => lowerQuestion.includes(keyword));
+        
+        if (hasKeyword) {
+            return {
+                shouldAnalyze: true,
+                reasoning: '关键词匹配检测到 DOM 相关需求'
+            };
+        }
+
         const apiKey = await getApiKeyFromStorage()
+        if (!apiKey || apiKey.trim() === '') {
+            return {
+                shouldAnalyze: containsDOMKeywords(question),
+                reasoning: 'API 密钥未配置，使用关键词匹配'
+            };
+        }
+
         const aiClient = new DoubaoAIClient(apiKey)
         const messages: ChatMessage[] = [
             {

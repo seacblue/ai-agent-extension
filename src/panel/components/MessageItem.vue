@@ -319,7 +319,7 @@ const copyToClipboard = async (content: string) => {
 .message.thinking {
     color: #333;
     margin-right: auto;
-    padding: 12px 16px;
+    padding: 4px 16px;
     border-radius: 0;
     box-shadow: none;
     background: transparent;
@@ -327,7 +327,7 @@ const copyToClipboard = async (content: string) => {
     transition: none;
     transform: none;
     width: 100%;
-    margin-bottom: 0;
+    margin-bottom: 4px;
 }
 
 .message.thinking .message-background {
@@ -349,7 +349,7 @@ const copyToClipboard = async (content: string) => {
     width: 100%;
     color: #9ca3af;
     font-size: 13px;
-    line-height: 2.2;
+    line-height: 1.6;
     transition: all 0.3s ease;
 }
 
@@ -358,11 +358,12 @@ const copyToClipboard = async (content: string) => {
     position: relative;
     padding-left: 0;
     transition: all 0.3s ease;
+    margin-bottom: 2px;
 }
 
 .thinking-step {
     position: relative;
-    margin-bottom: -4px;
+    margin-bottom: -2px;
     opacity: 1;
     transform: translateY(0);
     transition: all 0.3s ease;
@@ -394,9 +395,9 @@ const copyToClipboard = async (content: string) => {
 
 /* 思考进度指示器 */
 .thinking-progress {
-    margin-top: 8px;
+    margin-top: 4px;
     margin-left: -8px;
-    padding: 4px 0 4px 8px;
+    padding: 3px 0 3px 8px;
     background-color: #f9fafb;
     border-radius: 4px;
     font-size: 11px;
