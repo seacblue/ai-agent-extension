@@ -4,4 +4,3 @@
 
 export * from './timeUtils'
 export * from './pageUtils'
-export * from './errorHandler'

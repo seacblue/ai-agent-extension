@@ -11,6 +11,7 @@ export interface ToolContext {
     tabId?: number;
     timestamp: string;
     requestId?: string;
+    question?: string;
 }
 
 export interface Tool {

@@ -39,7 +39,7 @@ declare global {
   // 全局接口类型声明
   interface Window {
     addThinkingMessage: (content: string) => number
-    addMessage: (type: 'user' | 'assistant', content: string, status?: 'success' | 'error') => number
+    addMessage: (type: 'USER' | 'ASSISTANT', content: string, status?: 'success' | 'error') => number
     updateThinkingConfig: (newConfig: Partial<ThinkingConfig>) => void
     getThinkingConfig: () => ThinkingConfig
     finishThinkingProcess: () => void
@@ -55,7 +55,7 @@ declare global {
 
   interface Message {
     id: number
-    type: 'user' | 'assistant' | 'thinking'
+    type: 'USER' | 'ASSISTANT' | 'THINKING'
     content: string
     timestamp: string
     status: 'success' | 'error'

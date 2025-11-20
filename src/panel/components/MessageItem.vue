@@ -6,10 +6,10 @@
         <div class="message-background"></div>
         <div class="message-content-wrapper">
             <!-- 普通消息内容 -->
-            <div v-if="message.type !== 'thinking'" class="message-content">
+            <div v-if="message.type !== 'THINKING'" class="message-content">
                 <!-- AI 助手消息使用 Markdown 渲染 -->
                 <MarkdownRenderer 
-                    v-if="message.type === 'assistant'" 
+                    v-if="message.type === 'ASSISTANT'" 
                     :content="message.content" 
                 />
                 <!-- 用户消息直接显示 -->
@@ -38,11 +38,11 @@
                 </div>
             </div>
             
-            <div v-if="message.type !== 'thinking'" class="message-footer">
-                <div v-if="message.type === 'user'" class="message-time">{{ message.timestamp }}</div>
+            <div v-if="message.type !== 'THINKING'" class="message-footer">
+                <div v-if="message.type === 'USER'" class="message-time">{{ message.timestamp }}</div>
                 
                 <!-- 助手消息的操作按钮 -->
-                <template v-if="message.type === 'assistant'">
+                <template v-if="message.type === 'ASSISTANT'">
                 <!-- 复制按钮 -->
                 <button class="copy-button" @click.stop="copyToClipboard(message.content)" :title="'复制'">
                     <img src="/icons/copy.png" alt="复制" class="copy-icon" />
@@ -76,7 +76,7 @@ interface ThinkingStep {
 
 interface Message {
     id: number
-    type: 'user' | 'assistant' | 'thinking'
+    type: 'USER' | 'ASSISTANT' | 'THINKING'
     content: string
     timestamp: string
     status: 'success' | 'error'
@@ -107,9 +107,9 @@ const emit = defineEmits<{
 // 计算消息样式类
 const messageClasses = computed(() => ({
     'message': true,
-    'user': props.message.type === 'user',
-    'assistant': props.message.type === 'assistant',
-    'thinking': props.message.type === 'thinking',
+    'user': props.message.type === 'USER',
+    'assistant': props.message.type === 'ASSISTANT',
+    'thinking': props.message.type === 'THINKING',
     'status-success': props.message.status === 'success',
     'status-error': props.message.status === 'error'
 }))
