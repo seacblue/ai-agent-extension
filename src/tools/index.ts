@@ -1,6 +1,6 @@
 import { toolManager } from './tool-manager';
-import { domTool } from './get-dom';
-import { cssAnalyzerTool } from './css-analyzer';
+import { domTool } from './getDOM';
+import { cssAnalyzerTool } from './CSSAnalyzer';
 
 // 注册所有工具
 export function registerAllTools() {
@@ -10,4 +10,4 @@ export function registerAllTools() {
     console.log('所有工具已注册完成');
 }
 
-export { toolManager, domTool, cssAnalyzerTool };
+export { toolManager };

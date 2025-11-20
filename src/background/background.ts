@@ -1,6 +1,6 @@
 // 导入 AI 客户端
-import { DoubaoAIClient, ChatMessage } from './ai-client'
-import { getApiKeyFromStorage, saveApiKey } from '../config/api'
+import { DoubaoAIClient, ChatMessage } from '../shared/services/AIClient'
+import { getApiKeyFromStorage, saveApiKey } from '../shared/services/API'
 
 // 存储当前活跃的定时器和 AI 客户端
 let activeTimers: NodeJS.Timeout[] = []

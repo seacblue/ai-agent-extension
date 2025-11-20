@@ -10,8 +10,11 @@
                     <h2>AI 开发者助手</h2>
                     <p>分析 DOM、CSS、网络请求，获取优化建议</p>
                 </div>
-                <button class="settings-button" @click="openApiKeySettings" title="设置">
-            <img src="/icons/setting.png" alt="设置" class="settings-icon" />
+                <button
+                    class="settings-button"
+                    @click="openApiKeySettings"
+                >
+            <img src="/icons/setting.png" alt="设置" class="settings-icon"/>
           </button>
             </div>
         </header>
@@ -60,12 +63,6 @@ import { generateId, getCurrentTimestamp } from '../shared/utils'
 import MessageItem from './components/MessageItem.vue'
 import MessageInput from './components/MessageInput.vue'
 import ApiKeyModal from './components/ApiKeyModal.vue'
-
-// 配置选项
-const config = {
-    enableThinkingMerge: true, // 启用思考过程自动合并
-    enableProgressiveDisplay: true // 启用渐进式显示
-}
 
 interface Message {
     id: number
@@ -179,7 +176,7 @@ const establishConnection = () => {
 
 // 计算属性：过滤掉不应该显示的消息类型
 const displayMessages = computed(() => {
-    return messages.filter(message => {
+    return messages.filter((message: any) => {
         // 确保不显示内容为 ELEMENT_SELECTED_RESULT 的消息
         // 虽然这种消息不应该被添加到 messages 数组中，但为了安全起见进行过滤
         return message.content !== 'ELEMENT_SELECTED_RESULT'
@@ -665,7 +662,7 @@ window.addThinkingMessage = (content: string) => {
         timestamp: getCurrentTimestamp()
     }
     
-    if (shouldMergeThinking() && config.enableThinkingMerge) {
+    if (shouldMergeThinking()) {
         const lastThinking = messages[messages.length - 1]
         if (!lastThinking.thinkingSteps) {
             lastThinking.thinkingSteps = []
@@ -789,13 +786,11 @@ onMounted(() => {
     justify-content: space-between;
     align-items: center;
 }
-
 .header-text h2 {
     margin: 0 0 4px 0;
     font-size: 16px;
     font-weight: 600;
 }
-
 .header-text p {
     margin: 0;
     font-size: 12px;
@@ -844,6 +839,20 @@ onMounted(() => {
     padding: 16px;
     scroll-behavior: smooth;
     min-height: 0;
+}
+.messages::-webkit-scrollbar {
+    width: 8px;
+}
+.messages::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+.messages::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+}
+.messages::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
 }
 
 /* 加载指示器样式 */
