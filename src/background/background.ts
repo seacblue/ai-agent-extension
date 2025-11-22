@@ -146,9 +146,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 })
 
-
-
-
 // 管理所有 Panel 连接
 const panelPorts = new Map<string, chrome.runtime.Port>()
 

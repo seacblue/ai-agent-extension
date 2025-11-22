@@ -733,7 +733,6 @@ const onApiKeyCleared = () => {
     showPopupMessage('API 密钥已清空', 'success')
     checkApiKeyStatus()
 }
-
 const checkApiKeyStatus = async () => {
     try {
         const response = await chrome.runtime.sendMessage({

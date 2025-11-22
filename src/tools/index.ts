@@ -1,4 +1,4 @@
-import { toolManager } from './tool-manager';
+import { toolManager } from './toolManager';
 import { domTool } from './getDOM';
 import { cssAnalyzerTool } from './CSSAnalyzer';
 
