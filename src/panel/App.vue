@@ -23,7 +23,7 @@
             <div class="chat-container">
                 <div class="messages" ref="messagesRef">
                     <MessageItem 
-                        v-for="message in displayMessages" 
+                        v-for="message in messages" 
                         :key="message.id"
                         :message="message"
                         :new-step-ids="newStepIds"
@@ -58,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick, computed } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { generateId, getCurrentTimestamp } from '../shared/utils'
 import MessageItem from './components/MessageItem.vue'
 import MessageInput from './components/MessageInput.vue'
@@ -115,9 +115,6 @@ let connectionRetryCount = 0
 const maxRetryCount = 3
 const connectionRetryDelay = 1000
 
-// 连接状态管理
-const connectionStatus = ref<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected')
-
 // 建立长连接
 const establishConnection = () => {
     if (panelPort) {
@@ -125,9 +122,7 @@ const establishConnection = () => {
         return panelPort
     }
 
-    connectionStatus.value = 'connecting'
     console.log('正在建立与 Background 的长连接...')
-    
     try {
         panelPort = chrome.runtime.connect({ name: 'question-response' })
         
@@ -139,12 +134,10 @@ const establishConnection = () => {
         panelPort.onDisconnect.addListener(() => {
             console.log('Panel 长连接已断开')
             panelPort = null
-            connectionStatus.value = 'disconnected'
             
             // 检查是否需要重连
             if (chrome.runtime.lastError) {
                 console.error('连接断开原因: ', chrome.runtime.lastError.message)
-                connectionStatus.value = 'error'
                 
                 // 如果不是主动断开且重试次数未超限，则尝试重连
                 if (connectionRetryCount < maxRetryCount) {
@@ -160,7 +153,6 @@ const establishConnection = () => {
         })
         
         // 连接成功
-        connectionStatus.value = 'connected'
         connectionRetryCount = 0
         console.log('Panel 长连接建立成功')
         
@@ -168,53 +160,10 @@ const establishConnection = () => {
         
     } catch (error) {
         console.error('建立长连接失败: ', error)
-        connectionStatus.value = 'error'
         panelPort = null
         return null
     }
 }
-
-// 计算属性：过滤掉不应该显示的消息类型
-const displayMessages = computed(() => {
-    return messages.filter((message: any) => {
-        // 确保不显示内容为 ELEMENT_SELECTED_RESULT 的消息
-        // 虽然这种消息不应该被添加到 messages 数组中，但为了安全起见进行过滤
-        return message.content !== 'ELEMENT_SELECTED_RESULT'
-    })
-})
-
-// 在组件挂载时主动建立长连接
-onMounted(() => {
-    // 主动建立到 Background 的长连接
-    establishConnection()
-    
-    // 监听来自 Content Script 的元素选择结果
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-        console.log('Panel 收到消息: ', message.type)
-        
-        if (message.type === 'ELEMENT_SELECTED_RESULT') {
-            console.log('收到元素选择结果: ', message.elementData)
-            
-            // 存储元素信息
-            selectedElement.value = {
-                id: generateId().toString(),
-                elementData: message.elementData,
-                summary: generateElementSummary(message.elementData),
-                timestamp: Date.now()
-            }
-            
-            console.log('元素信息已存储: ', selectedElement.value)
-            
-            if (messageInputRef.value) {
-                messageInputRef.value.resetElementSelector()
-            }
-            
-            sendResponse({ success: true })
-        }
-        
-        return true // 保持消息通道开放
-    })
-})
 
 // 生成元素信息摘要
 const generateElementSummary = (elementData: any): string => {
@@ -755,8 +704,37 @@ onMounted(() => {
         '你好！我是AI开发者助手，可以帮你分析页面DOM结构、CSS样式、网络请求等。有什么问题尽管问我！',
         'success')
 
-    chrome.runtime.onMessage.addListener((message) => {
-        handleBackgroundResponse(message)
+    // 主动建立到 Background 的长连接
+    establishConnection()
+    
+    // 监听来自 Background 的消息
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+        // 处理来自 Content Script 的元素选择结果
+        if (message.type === 'ELEMENT_SELECTED_RESULT') {
+            console.log('Panel 收到消息: ', message.type)
+            console.log('收到元素选择结果: ', message.elementData)
+            
+            // 存储元素信息
+            selectedElement.value = {
+                id: generateId().toString(),
+                elementData: message.elementData,
+                summary: generateElementSummary(message.elementData),
+                timestamp: Date.now()
+            }
+            
+            console.log('元素信息已存储: ', selectedElement.value)
+            
+            if (messageInputRef.value) {
+                messageInputRef.value.resetElementSelector()
+            }
+            
+            sendResponse({ success: true })
+            return true // 保持消息通道开放
+        } else {
+            // 处理来自 Background 的其他消息
+            handleBackgroundResponse(message)
+            return true // 保持消息通道开放
+        }
     })
 
     checkApiKeyStatus()
