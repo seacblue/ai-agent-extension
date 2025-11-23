@@ -66,3 +66,68 @@ export async function isApiKeyConfigured(): Promise<boolean> {
   const apiKey = await getApiKeyFromStorage();
   return Boolean(apiKey && apiKey.trim().length > 0);
 }
+
+// 处理设置 API 密钥
+export async function handleSetApiKey(apiKey: string, sendResponse: (response: any) => void): Promise<void> {
+  try {
+    if (!apiKey || apiKey.trim().length === 0) {
+      throw new Error('API 密钥不能为空');
+    }
+    
+    await saveApiKey(apiKey.trim())
+    sendResponse({
+      type: 'success',
+      message: 'API 密钥保存成功',
+      status: 'success'
+    })
+  } catch (error) {
+    console.error('保存 API 密钥失败: ', error)
+    sendResponse({
+      type: 'error',
+      error: '保存 API 密钥失败: ' + (error as Error).message,
+      status: 'error'
+    })
+  }
+}
+
+// 处理获取 API 密钥
+export async function handleGetApiKey(sendResponse: (response: any) => void): Promise<void> {
+  try {
+    const apiKey = await getApiKeyFromStorage()
+    const hasKey = apiKey && apiKey.trim().length > 0
+    sendResponse({
+      type: 'success',
+      configured: hasKey,
+      apiKey: hasKey ? apiKey : null,
+      status: 'success'
+    })
+  } catch (error) {
+    console.error('获取 API 密钥状态失败: ', error)
+    sendResponse({
+      type: 'error',
+      error: '获取 API 密钥状态失败: ' + (error as Error).message,
+      status: 'error',
+      configured: false,
+      apiKey: null
+    })
+  }
+}
+
+// 处理清空 API 密钥
+export async function handleClearApiKey(sendResponse: (response: any) => void): Promise<void> {
+  try {
+    await saveApiKey('', true) // 允许空值来清空 API 密钥
+    sendResponse({
+      type: 'success',
+      message: 'API 密钥已清空',
+      status: 'success'
+    })
+  } catch (error) {
+    console.error('清空 API 密钥失败: ', error)
+    sendResponse({
+      type: 'error',
+      error: '清空 API 密钥失败: ' + (error as Error).message,
+      status: 'error'
+    })
+  }
+}

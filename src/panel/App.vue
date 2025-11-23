@@ -143,8 +143,7 @@ const messageService = new MessageService({
     },
     onError: (error) => {
         isSending.value = false
-        window.addMessage('ASSISTANT', error, 'error')
-        nextTick(() => scrollToBottom())
+        console.log(error)
     }
 })
 

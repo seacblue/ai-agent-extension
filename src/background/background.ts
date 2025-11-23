@@ -1,6 +1,6 @@
 // 导入 AI 客户端
-import { DoubaoAIClient, ChatMessage } from '../shared/services/AIClient'
-import { getApiKeyFromStorage, saveApiKey } from '../shared/services/API'
+import { DoubaoAIClient, ChatMessage } from '../shared/services/AIClient';
+import { getApiKeyFromStorage, handleSetApiKey, handleGetApiKey, handleClearApiKey } from '../shared/services/API';
 
 // 存储当前活跃的定时器和 AI 客户端
 let activeTimers: NodeJS.Timeout[] = []
@@ -68,7 +68,6 @@ class LongConnectionManager {
                             } else {
                                 reject(new Error(message.error || '请求失败'))
                             }
-                            port.disconnect()
                         }
                     })
 
@@ -123,6 +122,28 @@ class LongConnectionManager {
     }
 }
 
+// 扩展启动或安装时获取并保持API Key
+chrome.runtime.onStartup.addListener(async () => {
+    try {
+        // 启动时获取API Key，确保使用保存的值
+        const apiKey = await getApiKeyFromStorage();
+        console.log('扩展启动，获取 API Key 状态: ' + (apiKey ? '已配置' : '未配置'));
+    } catch (error) {
+        console.error('启动时获取 API Key 失败: ', error);
+    }
+});
+
+// 扩展安装时的处理
+chrome.runtime.onInstalled.addListener(async (_details) => {
+    try {
+        // 安装时获取API Key，确保使用保存的值
+        const apiKey = await getApiKeyFromStorage();
+        console.log('扩展安装，获取 API Key 状态: ' + (apiKey ? '已配置' : '未配置'));
+    } catch (error) {
+        console.error('安装时获取 API Key 失败: ', error);
+    }
+});
+
 // 监听来自 DevTools Panel 和 Content Script 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'ASK_QUESTION') {
@@ -170,16 +191,14 @@ chrome.runtime.onConnect.addListener((port) => {
         // 监听来自 Panel 的消息
         port.onMessage.addListener((request) => {
             console.log('收到 Panel 消息:', request.type)
-            
             if (request.type === 'TERMINATE') {
-            handleTerminateFromPanel(request, port)
+                handleTerminateFromPanel(request, port)
             }
-            // 可以在这里添加更多消息类型的处理
         })
         
         // 发送连接确认
         try {
-            // 在发送消息前检查port是否有效
+            // 在发送消息前检查 port 是否有效
             if (port.sender) {
                 port.postMessage({
                     type: 'CONNECTION_ACK',
@@ -189,14 +208,14 @@ chrome.runtime.onConnect.addListener((port) => {
                 console.log('发送连接确认成功: ', portId)
             } else {
                 console.warn('连接已断开，无法发送确认: ', portId)
-                // 如果port已失效，从集合中移除
+                // 如果 port 已失效，从集合中移除
                 if (panelPorts.has(portId)) {
                     panelPorts.delete(portId)
                 }
             }
         } catch (error) {
             console.error('发送 Panel 连接确认失败: ', error)
-            // 发生错误时从集合中移除port
+            // 发生错误时从集合中移除 port
             if (panelPorts.has(portId)) {
                 panelPorts.delete(portId)
             }
@@ -220,71 +239,6 @@ async function handleTabInfo(tabId: number | undefined, sendResponse: (response:
     } catch (error) {
         console.error('获取标签页信息失败: ', error)
         sendResponse({ error: '获取标签页信息失败' })
-    }
-}
-
-// 处理设置 API 密钥
-async function handleSetApiKey(apiKey: string, sendResponse: (response: any) => void) {
-    try {
-        if (!apiKey || apiKey.trim().length === 0) {
-            throw new Error('API 密钥不能为空');
-        }
-        
-        await saveApiKey(apiKey.trim())
-        sendResponse({
-            type: 'success',
-            message: 'API 密钥保存成功',
-            status: 'success'
-        })
-    } catch (error) {
-        console.error('保存 API 密钥失败: ', error)
-        sendResponse({
-            type: 'error',
-            error: '保存 API 密钥失败: ' + (error as Error).message,
-            status: 'error'
-        })
-    }
-}
-
-// 处理获取 API 密钥
-async function handleGetApiKey(sendResponse: (response: any) => void) {
-    try {
-        const apiKey = await getApiKeyFromStorage()
-        const hasKey = apiKey && apiKey.trim().length > 0
-        sendResponse({
-            type: 'success',
-            configured: hasKey,
-            apiKey: hasKey ? apiKey : null,
-            status: 'success'
-        })
-    } catch (error) {
-        console.error('获取 API 密钥状态失败: ', error)
-        sendResponse({
-            type: 'error',
-            error: '获取 API 密钥状态失败: ' + (error as Error).message,
-            status: 'error',
-            configured: false,
-            apiKey: null
-        })
-    }
-}
-
-// 处理清空 API 密钥
-async function handleClearApiKey(sendResponse: (response: any) => void) {
-    try {
-        await saveApiKey('', true) // 允许空值来清空 API 密钥
-        sendResponse({
-            type: 'success',
-            message: 'API 密钥已清空',
-            status: 'success'
-        })
-    } catch (error) {
-        console.error('清空 API 密钥失败: ', error)
-        sendResponse({
-            type: 'error',
-            error: '清空 API 密钥失败: ' + (error as Error).message,
-            status: 'error'
-        })
     }
 }
 
@@ -350,12 +304,22 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                     })
                     console.log('发送连接确认成功: ', Array.from(panelPorts.keys())[0])
                 } else {
-                    console.warn('连接已断开，无法发送确认')
+                    console.warn('连接已断开或无效，无法发送确认')
                     panelPort = null
+                    // 从panelPorts中移除断开的连接
+                    const portId = Array.from(panelPorts.keys())[0]
+                    if (portId) {
+                        panelPorts.delete(portId)
+                    }
                 }
             } catch (error) {
                 console.error('发送连接确认失败: ', error)
                 panelPort = null
+                // 从panelPorts中移除断开的连接
+                const portId = Array.from(panelPorts.keys())[0]
+                if (portId) {
+                    panelPorts.delete(portId)
+                }
             }
         } else {
             // 建立与 Panel 的长连接用于发送多个响应
@@ -365,7 +329,6 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
             const connectionTimeout = setTimeout(() => {
                 if (panelPort) {
                     console.warn('Panel 连接超时，断开连接')
-                    panelPort.disconnect()
                     panelPort = null
                 }
             }, 5000)
@@ -405,7 +368,7 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
             })
         }
         
-        const analysisDecision = await toolboxAnalysis(question)
+        const analysisDecision = await toolboxAnalysis(question, panelPort)
 
         // 获取标签页信息
         let tabId = (sender as any).tabId || sender.tab?.id
@@ -423,7 +386,6 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                         error: '无法获取当前标签页信息，请确保在网页上打开 DevTools',
                         requestId: requestId
                     })
-                    panelPort.disconnect()
                 } catch (error) {
                     console.error('发送标签页错误失败: ', error)
                 }
@@ -545,7 +507,6 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                             error: 'API 密钥未配置，请在设置中配置豆包 AI API 密钥',
                             requestId: requestId
                         })
-                        panelPort.disconnect()
                     } catch (error) {
                         console.error('发送 API 密钥错误失败: ', error)
                     }
@@ -596,7 +557,6 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                                     type: 'STREAMING_COMPLETE',
                                     requestId: requestId
                                 })
-                                panelPort.disconnect()
                             } catch (error) {
                                 console.error('发送完成消息失败: ', error)
                             }
@@ -614,7 +574,6 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                                     error: 'AI 生成失败: ' + error.message,
                                     requestId: requestId
                                 })
-                                panelPort.disconnect()
                             } catch (sendError) {
                                 console.error('发送错误消息失败: ', sendError)
                             }
@@ -633,7 +592,6 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                             error: 'AI 调用失败: ' + (error as Error).message,
                             requestId: requestId
                         })
-                        panelPort.disconnect()
                     } catch (sendError) {
                         console.error('发送错误消息失败: ', sendError)
                     }
@@ -661,28 +619,27 @@ function containsCSSKeywords(question: string, keywords: string[]): boolean {
 }
 
 // 合并的页面分析判断函数
-async function toolboxAnalysis(question: string): Promise<{
+async function toolboxAnalysis(question: string, panelPort?: chrome.runtime.Port | null): Promise<{
     shouldAnalyzeDOM: boolean,
     shouldAnalyzeCSS: boolean,
     targetElement?: string
 }> {
     try {
         const apiKey = await getApiKeyFromStorage()
-        if (!apiKey) {
-            // 回退到关键词匹配
-            const domResult = containsDOMKeywords(question, [
-                'dom', '元素', 'element', '标签', 'tag', '内容', 'content', '文本', 'text',
-                '结构', 'structure', 'html', '节点', 'node', '属性', 'attribute', 'class', 'id',
-                '选择器', 'selector', '父元素', '子元素', '兄弟元素', '查找', 'find', '获取', 'get'
-            ])
-            const cssResult = containsCSSKeywords(question, [
-                'css', '样式', 'style', '颜色', '布局', 'layout', 'design', '设计',
-                '美化', '动画', 'animation', '响应式', 'responsive', '主题', 'theme',
-                '字体', 'font', '背景', 'background', '边框', 'border', '阴影', 'shadow',
-                '渐变', 'gradient', 'flex', 'grid', 'position', 'display', 'margin',
-                'padding', 'width', 'height', 'class', 'id', 'selector', '选择器'
-            ])
-            return { shouldAnalyzeDOM: domResult, shouldAnalyzeCSS: cssResult }
+        if (!apiKey || apiKey.trim() === '') {
+            // API 密钥无效，通知 panel
+            if (panelPort) {
+                try {
+                    panelPort.postMessage({
+                        type: 'ERROR',
+                        content: 'API 密钥未配置，请在设置中配置豆包 AI API 密钥',
+                        timestamp: new Date().toISOString(),
+                        id: Date.now()
+                    })
+                } catch (error) {
+                    console.error('发送 API 密钥错误通知失败: ', error)
+                }
+            }
         }
         
         const aiClient = new DoubaoAIClient(apiKey)
@@ -743,7 +700,7 @@ async function toolboxAnalysis(question: string): Promise<{
                 '渐变', 'gradient', 'flex', 'grid', 'position', 'display', 'margin',
                 'padding', 'width', 'height', 'class', 'id', 'selector', '选择器'
             ])
-            console.log('🔄 回退到关键词匹配 - DOM:', domResult, 'CSS:', cssResult)
+            console.log('回退到关键词匹配 - DOM:', domResult, 'CSS:', cssResult)
             return { shouldAnalyzeDOM: domResult, shouldAnalyzeCSS: cssResult }
         }
     } catch (error) {

@@ -16,9 +16,7 @@ chrome.runtime.onMessage.addListener(async (request, _sender, sendResponse) => {
                 type: 'processing',
                 requestId: requestId
             })
-            
-            // 异步执行工具并通过长连接返回结果
-            executeToolsWithLongConnection(keywords, params, context, requestId)
+            executeTools(keywords, params, context, requestId)
             return true
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -46,7 +44,7 @@ chrome.runtime.onMessage.addListener(async (request, _sender, sendResponse) => {
 })
 
 // 通过长连接执行工具并返回结果
-async function executeToolsWithLongConnection(
+async function executeTools(
     keywords: string[], 
     params: any, 
     context: any, 
@@ -80,11 +78,6 @@ async function executeToolsWithLongConnection(
                 results
             }
         })
-        
-        // 短暂延迟后断开连接
-        setTimeout(() => {
-            port.disconnect()
-        }, 1000)
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error('长连接工具执行失败: ', error);
@@ -106,10 +99,5 @@ async function executeToolsWithLongConnection(
             success: false,
             error: errorMessage
         })
-        
-        // 短暂延迟后断开连接
-        setTimeout(() => {
-            port.disconnect()
-        }, 1000)
     }
 }

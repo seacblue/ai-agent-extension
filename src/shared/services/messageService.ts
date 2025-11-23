@@ -160,7 +160,7 @@ export class MessageService {
   }
   
   /**
-   * 发送消息到Background
+   * 发送消息到 Background
    */
   public async sendMessage(
     userInputText: string,
@@ -271,7 +271,6 @@ export class MessageService {
       } else {
         console.log('忽略过期请求的响应: ', response)
       }
-      
     } catch (error) {
       this.finishThinkingProcess()
       console.error('发送消息失败: ', error)
@@ -356,9 +355,9 @@ export class MessageService {
           if (this.isStreaming) {
             this.handleStreamingInterrupt()
           } else {
-            // 非流式传输期间的错误
-            this.onError?.(response.error)
+            this.addAssistantMessage(response.error, 'error')
           }
+          this.onError?.(response.error)
         }
         this.currentRequestId = null // 清理请求 ID
         break
@@ -368,7 +367,7 @@ export class MessageService {
         break
         
       case 'ELEMENT_SELECTED_RESULT':
-        // 这个消息由App.vue处理
+        // 这个消息由 App.vue 处理
         break
         
       default:
@@ -467,7 +466,6 @@ export class MessageService {
       timestamp: getCurrentTimestamp()
     }
     
-    // 这里简化处理，实际应该在App.vue中处理思考消息的合并
     const thinkingMessage: Message = {
       id: generateId(),
       type: 'THINKING',
