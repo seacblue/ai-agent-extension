@@ -4,7 +4,6 @@ import { Tool, ToolResult } from './types';
 interface CSSAnalyzerOptions {
     selector?: string;
     elementId?: string;
-    naturalQuery?: string;
     properties?: string[];
     includeAll?: boolean;
 }
@@ -29,36 +28,14 @@ interface CSSAnalysisResult {
     success: boolean;
     elementInfo: ElementInfo;
     computedStyle: CSSProperty[];
-    naturalQueryResult?: {
-        query: string;
-        answer: string;
-        property: string;
-        value: string;
-    };
     error?: string;
 }
-
-// CSS 属性映射表，用于自然语言查询
-const CSS_PROPERTY_MAP: { [key: string]: string[] } = {
-    'padding': ['padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left'],
-    'margin': ['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left'],
-    'border': ['border', 'border-width', 'border-style', 'border-color', 'border-radius'],
-    'background': ['background', 'background-color', 'background-image', 'background-size', 'background-position'],
-    'color': ['color', 'background-color'],
-    'size': ['width', 'height', 'max-width', 'max-height', 'min-width', 'min-height'],
-    'position': ['position', 'top', 'right', 'bottom', 'left', 'z-index'],
-    'display': ['display', 'visibility', 'opacity'],
-    'font': ['font', 'font-family', 'font-size', 'font-weight', 'font-style', 'line-height'],
-    'text': ['text-align', 'text-decoration', 'text-transform', 'text-indent'],
-    'flex': ['display', 'flex-direction', 'justify-content', 'align-items', 'flex-wrap', 'flex-grow', 'flex-shrink', 'flex-basis'],
-    'grid': ['display', 'grid-template-columns', 'grid-template-rows', 'grid-gap', 'grid-area']
-};
 
 // CSS 分析器工具实现
 class CSSAnalyzerTool implements Tool {
     name = 'cssAnalyzer';
-    description = 'CSS 样式分析工具，获取元素的计算样式并支持自然语言查询';
-    keywords = ['CSS', '样式', 'computedStyle', '计算样式', '元素', '样式分析', 'padding', 'margin', 'color', 'size'];
+    description = 'CSS 样式分析工具，获取元素的计算样式';
+    keywords = ['CSS', '样式', 'computedStyle', '计算样式', '元素', '样式分析'];
 
     async execute(params: CSSAnalyzerOptions = {}): Promise<ToolResult> {
         try {
@@ -77,18 +54,11 @@ class CSSAnalyzerTool implements Tool {
 
             // 获取计算样式
             const computedStyle = this.getComputedStyle(elementInfo.element, params);
-            
-            // 处理自然语言查询
-            let naturalQueryResult;
-            if (params.naturalQuery) {
-                naturalQueryResult = this.processNaturalQuery(params.naturalQuery, computedStyle);
-            }
 
             const result: CSSAnalysisResult = {
                 success: true,
                 elementInfo,
-                computedStyle,
-                naturalQueryResult
+                computedStyle
             };
 
             return {
@@ -211,49 +181,6 @@ class CSSAnalyzerTool implements Tool {
         }
 
         return properties;
-    }
-
-    // 处理自然语言查询
-    private processNaturalQuery(query: string, computedStyle: CSSProperty[]): any {
-        const lowerQuery = query.toLowerCase();
-        
-        // 查找匹配的 CSS 属性
-        for (const [key, properties] of Object.entries(CSS_PROPERTY_MAP)) {
-            if (lowerQuery.includes(key)) {
-                for (const prop of properties) {
-                    const cssProp = computedStyle.find(p => p.property === prop);
-                    if (cssProp && cssProp.value) {
-                        return {
-                            query,
-                            answer: `元素的 ${prop} 属性值是 ${cssProp.value}`,
-                            property: prop,
-                            value: cssProp.value
-                        };
-                    }
-                }
-            }
-        }
-
-        // 直接属性名匹配
-        const directMatch = computedStyle.find(p => 
-            lowerQuery.includes(p.property.replace(/-/g, ' '))
-        );
-        
-        if (directMatch) {
-            return {
-                query,
-                answer: `元素的 ${directMatch.property} 属性值是 ${directMatch.value}`,
-                property: directMatch.property,
-                value: directMatch.value
-            };
-        }
-
-        return {
-            query,
-            answer: '抱歉，我没有找到匹配的CSS属性。请尝试更具体的查询，如"padding"、"margin"、"color"等。',
-            property: '',
-            value: ''
-        };
     }
 
     // 获取元素的 XPath

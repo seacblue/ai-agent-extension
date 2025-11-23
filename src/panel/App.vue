@@ -1,8 +1,6 @@
 <template>
     <div class="ai-assistant">
-        <div v-if="showPopup" class="popup" :class="popupType">
-            {{ popupMessage }}
-        </div>
+        <PopupMessage ref="popupMessageRef" />
         
         <header class="assistant-header">
             <div class="header-content">
@@ -29,7 +27,6 @@
                         :new-step-ids="newStepIds"
                         :is-streaming="isStreaming"
                         :current-streaming-message="currentStreamingMessage"
-                        @message-click="onMessageClick"
                         @copy-to-clipboard="copyToClipboard"
                     />
                 </div>
@@ -59,10 +56,13 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, nextTick } from 'vue'
-import { generateId, getCurrentTimestamp } from '../shared/utils'
-import MessageItem from './components/MessageItem.vue'
-import MessageInput from './components/MessageInput.vue'
-import ApiKeyModal from './components/ApiKeyModal.vue'
+import { generateId } from '../shared/utils'
+import { MessageService } from '../shared/services/messageService'
+
+import MessageItem from './components/messageItem.vue'
+import MessageInput from './components/messageInput.vue'
+import ApiKeyModal from './components/APIKeyModal.vue'
+import PopupMessage from './components/popupMessage.vue'
 
 interface Message {
     id: number
@@ -83,11 +83,9 @@ interface ThinkingStep {
 const messageInputRef = ref<InstanceType<typeof MessageInput>>()
 const messages = reactive<Message[]>([])
 const messagesRef = ref<HTMLElement>()
+const popupMessageRef = ref()
 const newStepIds = ref<Set<number>>(new Set())
 const isSending = ref(false)
-const showPopup = ref(false)
-const popupMessage = ref('')
-const popupType = ref<'success' | 'error'>('success')
 
 // API 密钥设置相关
 const showApiKeySettings = ref(false)
@@ -96,10 +94,59 @@ const isApiKeyConfigured = ref(false)
 // 流式内容处理相关
 const currentStreamingMessage = ref<Message | null>(null)
 const isStreaming = ref(false)
-const accumulatedContent = ref('') // 用于累积流式内容
 
-// 请求管理相关
-const currentRequestId = ref<string | null>(null)
+// 消息服务实例
+const messageService = new MessageService({
+    onMessageAdded: (message) => {
+        // 处理思考完成的特殊消息
+        if (message.type === 'THINKING' && message.completed === true && message.thinkingSteps && message.thinkingSteps.length === 0) {
+            // 查找并更新最后一条思考消息
+            if (messages.length > 0) {
+                const lastMessageIndex = [...messages].reverse().findIndex(m => m.type === 'THINKING')
+                const actualIndex = lastMessageIndex !== -1 ? messages.length - 1 - lastMessageIndex : -1
+                if (actualIndex !== -1) {
+                    if (!messages[actualIndex].thinkingSteps || messages[actualIndex].thinkingSteps.length === 0) {
+                        // 移除没有思考步骤的思考消息
+                        messages.splice(actualIndex, 1)
+                    } else {
+                        // 标记有思考步骤的消息为已完成
+                        messages[actualIndex].completed = true
+                    }
+                }
+                return
+            }
+        }
+        
+        // 正常添加新消息
+        messages.push(message)
+    },
+    onStreamingStarted: () => {
+        isStreaming.value = true
+        currentStreamingMessage.value = messageService.currentStreamingMessage
+    },
+    onStreamingUpdated: (content) => {
+        if (messages.length > 0) {
+            const lastMessage = messages[messages.length - 1]
+            if (lastMessage.type === 'ASSISTANT') {
+                lastMessage.content = content
+            }
+        }
+        if (messageService.currentStreamingMessage) {
+            currentStreamingMessage.value = { ...messageService.currentStreamingMessage }
+        }
+    },
+    onStreamingComplete: () => {
+        isSending.value = false
+        isStreaming.value = false
+        currentStreamingMessage.value = null
+        nextTick(() => scrollToBottom())
+    },
+    onError: (error) => {
+        isSending.value = false
+        window.addMessage('ASSISTANT', error, 'error')
+        nextTick(() => scrollToBottom())
+    }
+})
 
 // 元素信息存储
 const selectedElement = ref<{
@@ -108,62 +155,6 @@ const selectedElement = ref<{
     summary: string
     timestamp: number
 } | null>(null)
-
-// 长连接管理
-let panelPort: chrome.runtime.Port | null = null
-let connectionRetryCount = 0
-const maxRetryCount = 3
-const connectionRetryDelay = 1000
-
-// 建立长连接
-const establishConnection = () => {
-    if (panelPort) {
-        console.log('长连接已存在，跳过建立')
-        return panelPort
-    }
-
-    console.log('正在建立与 Background 的长连接...')
-    try {
-        panelPort = chrome.runtime.connect({ name: 'question-response' })
-        
-        panelPort.onMessage.addListener((message) => {
-            console.log('Panel 收到长连接消息: ', message)
-            handleBackgroundResponse(message)
-        })
-        
-        panelPort.onDisconnect.addListener(() => {
-            console.log('Panel 长连接已断开')
-            panelPort = null
-            
-            // 检查是否需要重连
-            if (chrome.runtime.lastError) {
-                console.error('连接断开原因: ', chrome.runtime.lastError.message)
-                
-                // 如果不是主动断开且重试次数未超限，则尝试重连
-                if (connectionRetryCount < maxRetryCount) {
-                    connectionRetryCount++
-                    console.log(`尝试重连 (${connectionRetryCount}/${maxRetryCount})...`)
-                    setTimeout(() => {
-                        establishConnection()
-                    }, connectionRetryDelay * connectionRetryCount)
-                } else {
-                    console.error('长连接重连次数已达上限，停止重连')
-                }
-            }
-        })
-        
-        // 连接成功
-        connectionRetryCount = 0
-        console.log('Panel 长连接建立成功')
-        
-        return panelPort
-        
-    } catch (error) {
-        console.error('建立长连接失败: ', error)
-        panelPort = null
-        return null
-    }
-}
 
 // 生成元素信息摘要
 const generateElementSummary = (elementData: any): string => {
@@ -183,136 +174,22 @@ const removeSelectedElement = () => { selectedElement.value = null }
 const sendMessage = async () => {
     if (!messageInputRef.value?.getInputText().trim()) return
     
-    isSending.value = true
-    
-    // 如果有之前的请求，先取消它
-    if (currentRequestId.value) {
-        try {
-            await chrome.runtime.sendMessage({
-                type: 'TERMINATE_PROCESS',
-                requestId: currentRequestId.value
-            })
-        } catch (error) {
-            console.warn('取消之前请求失败: ', error)
-        }
-    }
-    
-    // 生成新的请求 ID
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    currentRequestId.value = requestId
-    
     // 获取输入框内容并清空
     const userInputText = messageInputRef.value.getInputText()
     messageInputRef.value.clearInput()
-    
-    // 构建包含元素信息的完整问题
-    let fullQuestion = userInputText
-    if (selectedElement.value) {
-        const elementInfo = selectedElement.value.elementData
-        const elementSummary = selectedElement.value.summary
-        
-        // 将元素信息作为上下文附加到问题中
-        fullQuestion = `${userInputText}
-
----
-**元素上下文信息:**
-- 元素: ${elementSummary}
-- 标签: ${elementInfo.tagName}
-- ID: ${elementInfo.id || '无'}
-- 类名: ${elementInfo.className || '无'}
-- 文本内容: ${elementInfo.textContent ? elementInfo.textContent.substring(0, 100) + (elementInfo.textContent.length > 100 ? '...' : '') : '无'}
-- 位置: x=${elementInfo.rect?.x || 0}, y=${elementInfo.rect?.y || 0}
-- 尺寸: ${elementInfo.rect?.width || 0}x${elementInfo.rect?.height || 0}
----`
-        
-        console.log('将元素信息附加到问题中: ', selectedElement.value.summary)
-    }
-    
-    // 添加一个小延迟确保 UI 更新
-    await new Promise(resolve => setTimeout(resolve, 100))
-    
-    const userMessage: Message = {
-        id: generateId(),
-        type: 'USER',
-        content: userInputText,
-        timestamp: getCurrentTimestamp(),
-        status: 'success'
-    }
-    
-    messages.push(userMessage)
-    await scrollToBottom()
-    
-    const thinkingMessage: Message = {
-        id: generateId(),
-        type: 'THINKING',
-        content: '',
-        timestamp: getCurrentTimestamp(),
-        status: 'success',
-        completed: false,
-        thinkingSteps: []
-    }
-    messages.push(thinkingMessage)
-    await scrollToBottom()
-    
-    // 发送消息到 Background Script
-    try {
-        // 首先建立长连接
-        const port = establishConnection()
-        if (!port) {
-            throw new Error('无法建立与 Background 的长连接')
+    await messageService.sendMessage(
+        userInputText,
+        selectedElement.value,
+        (sending) => {
+            isSending.value = sending
         }
-        
-        // 尝试获取当前标签页信息
-        let tabId = null
-        
-        try {
-            // 在 DevTools 中，我们需要通过 chrome.devtools.inspectedWindow 获取标签页 ID
-            if (chrome.devtools && chrome.devtools.inspectedWindow) {
-                tabId = chrome.devtools.inspectedWindow.tabId
-                console.log('从 DevTools 获取到标签页 ID: ', tabId)
-            }
-        } catch (devtoolsError) {
-            console.warn('无法从 DevTools 获取标签页 ID: ', devtoolsError)
-        }
-        
-        const response = await chrome.runtime.sendMessage({
-            type: 'ASK_QUESTION',
-            question: fullQuestion,  // 使用包含元素信息的完整问题
-            tabId,  // 传递标签页 ID
-            requestId  // 传递请求 ID
-        })
-        
-        // 检查响应是否匹配当前请求 ID
-        if (response && response.requestId === currentRequestId.value) {
-            handleBackgroundResponse(response)
-        } else {
-            console.log('忽略过期请求的响应: ', response)
-        }
-        
-    } catch (error) {
-        window.finishThinkingProcess()
-        console.error('发送消息失败: ', error)
-        // window.addMessage('assistant', '抱歉，处理您的问题时遇到了错误，请稍后再试。', 'error')
-        isSending.value = false
-        currentRequestId.value = null
-    }
-    
-    await scrollToBottom()
+    )
 }
 
 const terminateMessage = async () => {
-    isSending.value = false
-    window.finishThinkingProcess()
-    currentRequestId.value = null // 清理请求 ID
-    
-    // 向 Background 发送终止消息
-    try {
-        await chrome.runtime.sendMessage({
-            type: 'TERMINATE_PROCESS'
-        })
-    } catch (error) {
-        console.error('发送终止消息失败: ', error)
-    }
+    await messageService.terminateMessage((sending) => {
+        isSending.value = sending
+    })
 }
 
 // 处理元素选择器
@@ -370,142 +247,16 @@ const handleElementSelector = () => {
     }
 }
 
-// 统一处理后台响应
 const handleBackgroundResponse = (response: any) => {
-    if (!response) {
-        window.finishThinkingProcess()
-        window.addMessage('ASSISTANT', '未收到有效响应', 'error')
-        isSending.value = false
-        currentRequestId.value = null
+    if (response?.type === 'ELEMENT_SELECTED_RESULT') {
+        if (messageInputRef.value) {
+            messageInputRef.value.resetElementSelector()
+        }
         return
     }
-
-    switch (response.type) {
-        case 'THINKING':
-            window.finishThinkingProcess()
-            // 显示思考过程
-            if (response.content) {
-                window.addThinkingMessage(response.content)
-            }
-            break
-            
-        case 'STREAMING_CONTENT':
-            // 处理流式内容，实现实时拼接
-            if (response.content) {
-                handleStreamingContent(response.content, response.isFirstChunk)
-            }
-            break
-            
-        case 'STREAMING_COMPLETE':
-            // 流式完成，恢复时间戳显示
-            isStreaming.value = false
-            if (currentStreamingMessage.value) {
-                currentStreamingMessage.value.timestamp = getCurrentTimestamp()
-                currentStreamingMessage.value = null
-            }
-            accumulatedContent.value = '' // 重置累积内容
-            isSending.value = false
-            currentRequestId.value = null // 清理请求 ID
-            
-            // 流式完成后滚动到底部
-            scrollToBottom()
-            break
-        
-        case 'ERROR':
-            // 处理错误信息，支持不同类型的错误
-            if (response.error) {
-                window.finishThinkingProcess()
-                
-                // 判断错误类型并调用相应的中断处理
-                const errorMessage = response.error
-                
-                // 处理流式传输中断
-                if (isStreaming.value) {
-                    handleStreamingInterrupt()
-                } else {
-                    // 非流式传输期间的错误
-                    window.addMessage('ASSISTANT', errorMessage, 'error')
-                }
-            }
-            isSending.value = false
-            currentRequestId.value = null // 清理请求 ID
-            break
-            
-        case 'CONNECTION_ACK':
-            console.log('长连接已确认: ', response.portId)
-            break
-            
-        case 'ELEMENT_SELECTED_RESULT':
-            if (messageInputRef.value) {
-                messageInputRef.value.resetElementSelector()
-            }
-            break
-            
-        default:
-            // 兼容旧格式，统一处理
-            window.finishThinkingProcess()
-            const content = response.answer || response.content || response.error
-            if (content) {
-                const status = response.error ? 'error' : 'success'
-                window.addMessage('ASSISTANT', content, status)
-            } else {
-                // 记录未知响应格式
-                console.warn('收到未知格式的响应: ', response)
-                window.addMessage('ASSISTANT', '收到未知格式的响应', 'error')
-            }
-            isSending.value = false
-            currentRequestId.value = null // 清理请求 ID
-    }
-}
-
-// 处理流式内容的实时拼接
-const handleStreamingContent = (chunk: string, isFirstChunk: boolean) => {
-    isStreaming.value = true
     
-    if (isFirstChunk) {
-        window.finishThinkingProcess()
-        
-        // 重置累积内容并创建新的 assistant 消息
-        accumulatedContent.value = chunk
-        
-        currentStreamingMessage.value = {
-            id: generateId(),
-            type: 'ASSISTANT',
-            content: accumulatedContent.value,
-            timestamp: '', // 流式传输期间不显示时间戳
-            status: 'success'
-        }
-        messages.push(currentStreamingMessage.value)
-    } else if (currentStreamingMessage.value) {
-        // 后续数据块，累积内容并更新消息
-        accumulatedContent.value += chunk
-        currentStreamingMessage.value.content = accumulatedContent.value
-    } else {
-        // 没有当前流式消息但收到非首个数据块，重新初始化
-        console.warn('收到非首个数据块但没有当前流式消息，重新初始化')
-        accumulatedContent.value = chunk
-        
-        currentStreamingMessage.value = {
-            id: generateId(),
-            type: 'ASSISTANT',
-            content: accumulatedContent.value,
-            timestamp: '',
-            status: 'success'
-        }
-        messages.push(currentStreamingMessage.value)
-    }
-}
-
-// 处理流式传输中断
-const handleStreamingInterrupt = () => {
-    isStreaming.value = false
-    isSending.value = false
-    
-    if (currentStreamingMessage.value) {
-        currentStreamingMessage.value.timestamp = getCurrentTimestamp()
-        
-        currentStreamingMessage.value = null
-    }
+    // 其他响应交给消息服务处理
+    messageService.handleBackgroundResponse(response)
 }
 
 // 滚动到底部函数
@@ -548,127 +299,11 @@ const copyToClipboard = async (content: string) => {
     }
 }
 
-// 显示弹出提示
+// 使用组件方法显示弹出提示
 const showPopupMessage = (message: string, type: 'success' | 'error' = 'success') => {
-    popupMessage.value = message
-    popupType.value = type
-    showPopup.value = true
-    
-    setTimeout(() => {
-        const popupElement = document.querySelector('.popup') as HTMLElement
-        if (popupElement) {
-            popupElement.classList.add('hiding')
-            
-            setTimeout(() => {
-                showPopup.value = false
-                popupMessage.value = ''
-                popupType.value = 'success'
-            }, 400)
-        } else {
-            showPopup.value = false
-            popupMessage.value = ''
-            popupType.value = 'success'
-        }
-    }, 2500)
-}
-
-// 消息点击处理
-const onMessageClick = (_messageId: number) => { }
-
-// 创建思考消息
-const createThinkingMessage = (content: string): Message => {
-    const stepId = generateId()
-    const thinkingStep: ThinkingStep = {
-        id: stepId,
-        content,
-        timestamp: getCurrentTimestamp()
+    if (popupMessageRef.value) {
+        popupMessageRef.value.showPopupMessage(message, type)
     }
-    
-    return {
-        id: generateId(),
-        type: 'THINKING',
-        content: '',
-        timestamp: getCurrentTimestamp(),
-        status: 'success',
-        thinkingSteps: [thinkingStep]
-    }
-}
-
-const shouldMergeThinking = (): boolean => {
-    // 如果没有消息，不能合并
-    if (messages.length === 0) return false
-    
-    // 检查最后一个消息是否为未完成的 THINKING 消息
-    const lastMessage = messages[messages.length - 1]
-    return lastMessage.type === 'THINKING' && lastMessage.completed !== true
-}
-
-window.addThinkingMessage = (content: string) => {
-    const stepId = generateId()
-    const newStep: ThinkingStep = {
-        id: stepId,
-        content,
-        timestamp: getCurrentTimestamp()
-    }
-    
-    if (shouldMergeThinking()) {
-        const lastThinking = messages[messages.length - 1]
-        if (!lastThinking.thinkingSteps) {
-            lastThinking.thinkingSteps = []
-        }
-        
-        // 添加新步骤到现有思考消息
-        lastThinking.thinkingSteps.push(newStep)
-        newStepIds.value.add(stepId)
-        nextTick(() => {
-            requestAnimationFrame(() => {
-                setTimeout(() => {
-                    newStepIds.value.delete(stepId)
-                }, 300)
-            })
-        })
-        return lastThinking.id
-    }
-    
-    // 创建新的思考消息
-    const thinkingMessage = createThinkingMessage(content)
-    messages.push(thinkingMessage)
-    newStepIds.value.add(stepId)
-    nextTick(() => {
-        requestAnimationFrame(() => {
-            setTimeout(() => {
-                newStepIds.value.delete(stepId)
-            }, 300)
-        })
-    })
-    
-    return thinkingMessage.id
-}
-
-window.finishThinkingProcess = () => {
-    if (messages.length === 0) return
-    
-    const lastMessage = messages[messages.length - 1]
-    if (lastMessage.type === 'THINKING' && lastMessage.completed !== true) {
-        if (!lastMessage.thinkingSteps || lastMessage.thinkingSteps.length === 0) {
-            messages.pop()
-        } else {
-            lastMessage.completed = true
-        }
-    }
-}
-
-window.addMessage = (type: 'USER' | 'ASSISTANT', content: string, status: 'success' | 'error' = 'success') => {
-    const message: Message = {
-        id: generateId(),
-        type,
-        content,
-        timestamp: getCurrentTimestamp(),
-        status
-    }
-    messages.push(message)
-    
-    return message.id
 }
 
 // API 密钥相关方法
@@ -700,14 +335,6 @@ const checkApiKeyStatus = async () => {
 }
 
 onMounted(() => {
-    window.addMessage('ASSISTANT', 
-        '你好！我是AI开发者助手，可以帮你分析页面DOM结构、CSS样式、网络请求等。有什么问题尽管问我！',
-        'success')
-
-    // 主动建立到 Background 的长连接
-    establishConnection()
-    
-    // 监听来自 Background 的消息
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // 处理来自 Content Script 的元素选择结果
         if (message.type === 'ELEMENT_SELECTED_RESULT') {
@@ -853,70 +480,6 @@ onMounted(() => {
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
-}
-
-.popup {
-    position: fixed;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: white;
-    color: #333;
-    padding: 12px 24px;
-    border-radius: 25px;
-    font-size: 14px;
-    font-weight: 500;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
-    z-index: 1000;
-    animation: popupSlideIn 0.3s ease-out;
-    transition: all 0.4s ease;
-    border: 1px solid #e9ecef;
-}
-.popup.success {
-    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-    color: white;
-    border: 1px solid #28a745;
-    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
-}
-.popup.success:hover {
-    box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
-}
-.popup.error {
-    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-    color: white;
-    border: 1px solid #dc3545;
-    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
-}
-.popup.error:hover {
-    box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
-}
-.popup:hover {
-    transform: translateX(-50%) translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
-}
-.popup.hiding {
-    animation: popupSlideOut 0.3s ease-out forwards;
-}
-
-@keyframes popupSlideIn {
-    from {
-        opacity: 0;
-        transform: translateX(-50%) translateY(-20px) scale(0.9);
-    }
-    to {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0) scale(1);
-    }
-}
-@keyframes popupSlideOut {
-    from {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0) scale(1);
-    }
-    to {
-        opacity: 0;
-        transform: translateX(-50%) translateY(-20px) scale(0.9);
-    }
 }
 
 .message-status {

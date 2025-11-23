@@ -179,13 +179,27 @@ chrome.runtime.onConnect.addListener((port) => {
         
         // 发送连接确认
         try {
-            port.postMessage({
-                type: 'CONNECTION_ACK',
-                portId: portId,
-                timestamp: new Date().toISOString()
-            })
+            // 在发送消息前检查port是否有效
+            if (port.sender) {
+                port.postMessage({
+                    type: 'CONNECTION_ACK',
+                    portId: portId,
+                    timestamp: new Date().toISOString()
+                })
+                console.log('发送连接确认成功: ', portId)
+            } else {
+                console.warn('连接已断开，无法发送确认: ', portId)
+                // 如果port已失效，从集合中移除
+                if (panelPorts.has(portId)) {
+                    panelPorts.delete(portId)
+                }
+            }
         } catch (error) {
             console.error('发送 Panel 连接确认失败: ', error)
+            // 发生错误时从集合中移除port
+            if (panelPorts.has(portId)) {
+                panelPorts.delete(portId)
+            }
         }
     }
 })
@@ -327,13 +341,21 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
             
             // 发送连接确认
             try {
-                panelPort.postMessage({
-                    type: 'CONNECTION_ACK',
-                    portId: Array.from(panelPorts.keys())[0],
-                    timestamp: new Date().toISOString()
-                })
+                // 在发送消息前检查 port 是否有效
+                if (panelPort.sender) {
+                    panelPort.postMessage({
+                        type: 'CONNECTION_ACK',
+                        portId: Array.from(panelPorts.keys())[0],
+                        timestamp: new Date().toISOString()
+                    })
+                    console.log('发送连接确认成功: ', Array.from(panelPorts.keys())[0])
+                } else {
+                    console.warn('连接已断开，无法发送确认')
+                    panelPort = null
+                }
             } catch (error) {
                 console.error('发送连接确认失败: ', error)
+                panelPort = null
             }
         } else {
             // 建立与 Panel 的长连接用于发送多个响应

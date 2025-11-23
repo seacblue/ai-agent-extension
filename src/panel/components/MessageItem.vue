@@ -65,7 +65,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import MarkdownRenderer from './MarkdownRenderer.vue'
+import MarkdownRenderer from './markdownRenderer.vue'
 
 // 接口定义
 interface ThinkingStep {
