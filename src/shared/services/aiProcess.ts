@@ -19,7 +19,7 @@ export interface QuestionOptions {
   requestId: string;
   sender: chrome.runtime.MessageSender;
   sendResponse: (response: any) => void;
-  panelPorts?: Map<string, chrome.runtime.Port>;
+  panelPort?: chrome.runtime.Port | null;
   getApiKeyFromStorage?: () => Promise<string>;
   LongConnectionManager?: any;
 }
@@ -137,55 +137,41 @@ export class AIProcessService {
    * @param options - 问题处理选项
    */
   public async handleQuestion(options: QuestionOptions): Promise<void> {
-    let panelPort: chrome.runtime.Port | null = null;
-    const { question, requestId, sender, sendResponse, panelPorts, getApiKeyFromStorage, LongConnectionManager } = options;
+    let currentPanelPort: chrome.runtime.Port | null = null;
+    const { question, requestId, sender, sendResponse, panelPort: incomingPanelPort, getApiKeyFromStorage, LongConnectionManager } = options;
     
     try {
       // 检查是否已经有 Panel 连接
-      if (panelPorts && panelPorts.size > 0) {
-        // 使用现有的 Panel 连接
-        const portValue = panelPorts.values().next().value;
-        panelPort = portValue !== undefined ? portValue : null;
-        console.log('使用现有的 Panel 连接');
+      if (incomingPanelPort) {
+        currentPanelPort = incomingPanelPort;
+        console.log('使用传入的 Panel 连接');
         
         // 发送连接确认
         try {
           // 在发送消息前检查 port 是否有效
-          if (panelPort && panelPort.sender) {
-            const portId = panelPorts.keys().next().value;
-            panelPort.postMessage({
+          if (currentPanelPort && currentPanelPort.sender) {
+            currentPanelPort.postMessage({
               type: 'CONNECTION_ACK',
-              portId: portId,
               timestamp: new Date().toISOString()
             });
-            console.log('发送连接确认成功: ', portId);
+            console.log('发送连接确认成功');
           } else {
             console.warn('连接已断开或无效，无法发送确认');
-            panelPort = null;
-            // 从 panelPorts 中移除断开的连接
-            const portId = panelPorts.keys().next().value;
-            if (portId) {
-              panelPorts.delete(portId);
-            }
+            currentPanelPort = null;
           }
         } catch (error) {
           console.error('发送连接确认失败: ', error);
-          panelPort = null;
-          // 从 panelPorts 中移除断开的连接
-          const portId = panelPorts.keys().next().value;
-          if (portId) {
-            panelPorts.delete(portId);
-          }
+          currentPanelPort = null;
         }
       } else {
         // 建立与 Panel 的长连接用于发送多个响应
-        panelPort = chrome.runtime.connect({ name: 'question-response' });
+        currentPanelPort = chrome.runtime.connect({ name: 'question-response' });
         
         // 设置连接超时
         const connectionTimeout = setTimeout(() => {
-          if (panelPort) {
+          if (currentPanelPort) {
             console.warn('Panel 连接超时，断开连接');
-            panelPort = null;
+            currentPanelPort = null;
           }
         }, 5000);
         
@@ -193,17 +179,17 @@ export class AIProcessService {
         const connectionAckPromise = new Promise<void>((resolve, reject) => {
           let ackReceived = false;
           
-          if (panelPort) {
-            panelPort.onMessage.addListener((message: any) => {
+          if (currentPanelPort) {
+            currentPanelPort.onMessage.addListener((message: any) => {
               if (message.type === 'CONNECTION_ACK') {
                 ackReceived = true;
-                console.log('收到 Panel 连接确认: ', message.portId);
+                console.log('收到 Panel 连接确认');
                 clearTimeout(connectionTimeout);
                 resolve();
               }
             });
             
-            panelPort.onDisconnect.addListener(() => {
+            currentPanelPort.onDisconnect.addListener(() => {
               clearTimeout(connectionTimeout);
               if (!ackReceived) {
                 if (chrome.runtime.lastError) {
@@ -223,16 +209,16 @@ export class AIProcessService {
         console.log('Background 与 Panel 长连接建立成功');
         
         // 重新设置断开监听器
-        if (panelPort) {
-          panelPort.onDisconnect.addListener(() => {
+        if (currentPanelPort) {
+          currentPanelPort.onDisconnect.addListener(() => {
             console.log('Panel 连接已断开');
-            panelPort = null;
+            currentPanelPort = null;
           });
         }
       }
 
       // 分析问题需求
-      const analysisDecision = await this.analyzeQuestionRequirements(question, panelPort);
+      const analysisDecision = await this.analyzeQuestionRequirements(question, currentPanelPort);
 
       // 获取标签页信息
       let tabId = (sender as any).tabId || sender.tab?.id;
@@ -243,9 +229,9 @@ export class AIProcessService {
       }
       
       if (!tabId) {
-        if (panelPort) {
+        if (currentPanelPort) {
           try {
-            panelPort.postMessage({
+            currentPanelPort.postMessage({
               type: 'ERROR',
               error: '无法获取当前标签页信息，请确保在网页上打开 DevTools',
               requestId: requestId
@@ -261,10 +247,10 @@ export class AIProcessService {
       let promptParts = ['你是一个专业的AI开发者助手，擅长分析网页结构和回答技术问题。'];
 
       // DOM分析
-      if (analysisDecision.shouldAnalyzeDOM && LongConnectionManager && panelPort) {
+      if (analysisDecision.shouldAnalyzeDOM && LongConnectionManager && currentPanelPort) {
         try {
-          if (panelPort) {
-            panelPort.postMessage({
+          if (currentPanelPort) {
+            currentPanelPort.postMessage({
               type: 'THINKING',
               content: '正在使用 DOM 分析工具...',
               requestId: requestId
@@ -312,10 +298,10 @@ export class AIProcessService {
       }
 
       // CSS分析
-      if (analysisDecision.shouldAnalyzeCSS && LongConnectionManager && panelPort) {
+      if (analysisDecision.shouldAnalyzeCSS && LongConnectionManager && currentPanelPort) {
         try {
-          if (panelPort) {
-            panelPort.postMessage({
+          if (currentPanelPort) {
+            currentPanelPort.postMessage({
               type: 'THINKING',
               content: '正在使用 CSS 分析工具...',
               requestId: requestId
@@ -379,9 +365,9 @@ export class AIProcessService {
       
       const apiKey = await getApiKeyFromStorage();
       if (!apiKey || apiKey.trim() === '') {
-        if (panelPort) {
+        if (currentPanelPort) {
           try {
-            panelPort.postMessage({
+            currentPanelPort.postMessage({
               type: 'ERROR',
               error: 'API 密钥未配置，请在设置中配置豆包 AI API 密钥',
               requestId: requestId
@@ -403,12 +389,12 @@ export class AIProcessService {
         finalPrompt,
         undefined,
         undefined,
-        {
+        {          
           // 处理每个数据块
           onChunk: (chunk: string, isFirst: boolean) => {
-            if (panelPort) {
+            if (currentPanelPort) {
               try {
-                panelPort.postMessage({
+                currentPanelPort.postMessage({
                   type: 'STREAMING_CONTENT',
                   content: chunk,
                   isFirstChunk: isFirst,
@@ -416,32 +402,32 @@ export class AIProcessService {
                 });
               } catch (error) {
                 console.error('发送流式内容失败: ', error);
-                panelPort = null;
+                currentPanelPort = null;
               }
             }
           },
           // 完成回调
           onComplete: () => {
             this.currentAIProcess = null;
-            if (panelPort) {
+            if (currentPanelPort) {
               try {
-                panelPort.postMessage({
+                currentPanelPort.postMessage({
                   type: 'STREAMING_COMPLETE',
                   requestId: requestId
                 });
               } catch (error) {
                 console.error('发送完成消息失败: ', error);
               }
-              panelPort = null;
+              currentPanelPort = null;
             }
           },
           // 错误处理
           onError: (error: Error) => {
             this.currentAIProcess = null;
             console.error('AI 调用失败: ', error);
-            if (panelPort) {
+            if (currentPanelPort) {
               try {
-                panelPort.postMessage({
+                currentPanelPort.postMessage({
                   type: 'ERROR',
                   error: 'AI 生成失败: ' + error.message,
                   requestId: requestId
@@ -449,7 +435,7 @@ export class AIProcessService {
               } catch (sendError) {
                 console.error('发送错误消息失败: ', sendError);
               }
-              panelPort = null;
+              currentPanelPort = null;
             }
           }
         }
@@ -457,9 +443,9 @@ export class AIProcessService {
     } catch (error) {
       console.error('处理问题时出错: ', error);
       
-      if (panelPort) {
+      if (currentPanelPort) {
         try {
-          panelPort.postMessage({
+          currentPanelPort.postMessage({
             type: 'ERROR',
             error: '处理问题失败: ' + (error as Error).message,
             requestId: requestId
@@ -467,7 +453,7 @@ export class AIProcessService {
         } catch (sendError) {
           console.error('发送错误消息失败: ', sendError);
         }
-        panelPort = null;
+        currentPanelPort = null;
       }
       
       sendResponse({

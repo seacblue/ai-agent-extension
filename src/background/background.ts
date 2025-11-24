@@ -1,4 +1,3 @@
-// 导入服务
 import { getApiKeyFromStorage, handleSetApiKey, handleGetApiKey, handleClearApiKey } from '../shared/services/api';
 import { LongConnectionManager } from '../shared/services/longConnectionManager';
 import { AIProcessService, TerminateOptions } from '../shared/services/aiProcess';
@@ -41,21 +40,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false
 })
 
-// 管理所有 Panel 连接
-const panelPorts = new Map<string, chrome.runtime.Port>()
+// 管理单个 Panel 连接
+let panelPort: chrome.runtime.Port | null = null
 
 // 监听来自 Content Script 的长连接
 chrome.runtime.onConnect.addListener((port) => {
     if (port.name === 'question-response') {
         // 处理 Panel 连接
-        const portId = `panel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+        console.log('Panel 连接建立')
         
-        panelPorts.set(portId, port)
-        console.log(`Panel 连接建立: ${portId}`)
+        // 如果已有连接，先断开旧连接
+        if (panelPort) {
+            try {
+                panelPort.disconnect();
+                console.log('断开旧的 Panel 连接')
+            } catch (error) {
+                console.error('断开旧连接失败:', error)
+            }
+        }
+        
+        panelPort = port
         
         port.onDisconnect.addListener(() => { 
-            panelPorts.delete(portId)
-            console.log(`Panel 连接断开: ${portId}`)
+            console.log('Panel 连接断开')
+            panelPort = null
             
             if (chrome.runtime.lastError) {
                 console.error(`Panel 连接断开错误: ${chrome.runtime.lastError.message}`)
@@ -80,22 +88,16 @@ chrome.runtime.onConnect.addListener((port) => {
             if (port.sender) {
                 port.postMessage({
                     type: 'CONNECTION_ACK',
-                    portId: portId,
                     timestamp: new Date().toISOString()
                 })
-                console.log('发送连接确认成功: ', portId)
+                console.log('发送连接确认成功')
             } else {
-                console.warn('连接已断开，无法发送确认: ', portId)
-                // 如果 port 已失效，从集合中移除
-                if (panelPorts.has(portId)) {
-                    panelPorts.delete(portId)
-                }
+                console.warn('连接已断开，无法发送确认')
+                panelPort = null
             }
         } catch (error) {
             console.error('发送 Panel 连接确认失败: ', error)
-            if (panelPorts.has(portId)) {
-                panelPorts.delete(portId)
-            }
+            panelPort = null
         }
     }
 })
@@ -127,7 +129,7 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
             requestId,
             sender,
             sendResponse,
-            panelPorts,
+            panelPort,
             getApiKeyFromStorage,
             LongConnectionManager
         });
