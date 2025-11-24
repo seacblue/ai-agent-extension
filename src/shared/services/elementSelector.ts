@@ -126,16 +126,14 @@ class ElementSelectorService {
         if (this.elementOverlay) {
             this.removeHighlightOverlay()
         }
-        this.injectGlobalStyles()
         
         // 创建覆盖层元素
         this.elementOverlay = document.createElement('div')
         
-        // 使用 ID 和类名而不是内联样式，便于维护和覆盖
+        // 设置 ID 和类名
         this.elementOverlay.id = 'element-selector-overlay'
         this.elementOverlay.className = 'element-selector-overlay'
         
-        // 添加样式属性，确保基础功能
         Object.assign(this.elementOverlay.style, {
             position: 'absolute',
             pointerEvents: 'none',
@@ -149,56 +147,6 @@ class ElementSelectorService {
         })
         
         document.body.appendChild(this.elementOverlay)
-    }
-    
-    // 注入全局样式表
-    private injectGlobalStyles(): void {
-        // 检查是否已注入样式
-        if (document.getElementById('element-selector-styles')) {
-            return
-        }
-        
-        // 创建样式元素
-        const styleElement = document.createElement('style')
-        styleElement.id = 'element-selector-styles'
-        styleElement.type = 'text/css'
-        
-        // 添加 CSS 规则
-        styleElement.textContent = `
-            #element-selector-overlay,
-            .element-selector-overlay {
-                position: absolute;
-                pointer-events: none;
-                border: 2px solid #007bff;
-                background-color: rgba(0, 123, 255, 0.1);
-                z-index: 999999;
-                box-sizing: border-box;
-                outline: none;
-                transition: all 0.1s ease;
-                box-shadow: 0 0 0 1px rgba(0, 123, 255, 0.3);
-            }
-            
-            .element-selector-tooltip {
-                position: absolute;
-                background-color: #2d2d2d;
-                color: white;
-                padding: 4px 8px;
-                font-size: 12px;
-                font-family: Arial, sans-serif;
-                border-radius: 2px;
-                pointer-events: none;
-                z-index: 999999;
-                white-space: nowrap;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-            }
-            
-            .element-selector-active {
-                cursor: crosshair;
-            }
-        `
-        
-        // 注入到文档头
-        document.head.appendChild(styleElement)
     }
     
     // 移除高亮覆盖层
@@ -537,16 +485,30 @@ class ElementSelectorService {
             top: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background-color: #1a365d;
-            color: white;
+            background-color: #e3f2fd;
+            color: #1565c0;
             padding: 10px 15px;
             border-radius: 5px;
-            font-size: 14px;
             z-index: 999999;
             pointer-events: none;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            text-align: center;
+            min-width: 200px;
         `
-        tooltip.textContent = '请点击要选择的元素 (右键取消)'
+        const mainText = document.createElement('div')
+        mainText.textContent = '请点击要选择的元素'
+        mainText.style.cssText = `
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        `
+        const subText = document.createElement('div')
+        subText.textContent = '右键取消'
+        subText.style.cssText = `
+            font-size: 12px;
+        `
+        tooltip.appendChild(mainText)
+        tooltip.appendChild(subText)
         
         document.body.appendChild(tooltip)
     }
@@ -558,6 +520,9 @@ class ElementSelectorService {
             tooltip.remove()
         }
     }
+
+    // 已知 bug：关闭 devtools 之后这个东西不会关掉。
+    // 但是我不会改，呵呵
 }
 
 // 导出单例实例

@@ -32,11 +32,6 @@ chrome.runtime.onMessage.addListener(async (request, _sender, sendResponse) => {
         elementSelector.startElementSelector();
         sendResponse({ type: 'success', message: '元素选择器已启动' });
         return true;
-    } else if (request.type === 'STOP_ELEMENT_SELECTOR') {
-        console.log('接收到停止元素选择器请求');
-        elementSelector.stopElementSelector();
-        sendResponse({ type: 'success', message: '元素选择器已停止' });
-        return true;
     } else {
         console.log('Content Script 收到未知消息类型: ', request.type)
         // 对于未知类型的消息，发送响应以避免通道错误

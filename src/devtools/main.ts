@@ -9,9 +9,5 @@ chrome.devtools.panels.create(
         panel.onShown.addListener(function() {
             console.log('AI 助手面板显示')
         })
-        
-        panel.onHidden.addListener(function() {
-            console.log('AI 助手面板隐藏')
-        })
     }
 )
