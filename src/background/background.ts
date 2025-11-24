@@ -1,16 +1,15 @@
-// 导入 AI 客户端
-import { DoubaoAIClient, ChatMessage } from '../shared/services/aiClient';
+// 导入服务
 import { getApiKeyFromStorage, handleSetApiKey, handleGetApiKey, handleClearApiKey } from '../shared/services/api';
 import { LongConnectionManager } from '../shared/services/longConnectionManager';
+import { AIService } from '../shared/services/aiService';
 
-// 存储当前活跃的定时器和 AI 客户端
+// 存储当前活跃的连接管理器
 let currentAIProcess: { abort: () => void } | null = null
-let currentAbortController: AbortController | null = null
 
 // 扩展启动或安装时获取并保持 API Key
 chrome.runtime.onStartup.addListener(async () => {
     try {
-        // 启动时获取API Key，确保使用保存的值
+        // 启动时获取 API Key，确保使用保存的值
         const apiKey = await getApiKeyFromStorage();
         console.log('扩展启动，获取 API Key 状态: ' + (apiKey ? '已配置' : '未配置'));
     } catch (error) {
@@ -21,7 +20,7 @@ chrome.runtime.onStartup.addListener(async () => {
 // 监听来自 DevTools Panel 和 Content Script 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'ASK_QUESTION') {
-        // 对于ASK_QUESTION请求，使用异步处理但立即返回成功，因为实际响应会通过长连接发送
+        // 对于 ASK_QUESTION 请求，使用异步处理但立即返回成功，因为实际响应会通过长连接发送
         sendResponse({ type: 'processing', message: '问题处理中，通过长连接返回结果' })
         handleQuestion(request.question, request.requestId, sender, () => {})
         return false // 不需要保持通道开放，因为使用长连接进行异步通信
@@ -29,11 +28,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         handleTabInfo(sender.tab?.id, sendResponse)
         return true
     } else if (request.type === 'TERMINATE_PROCESS') {
-          terminateTasks({ 
-              responseMethod: 'sendResponse',
-              sendResponse 
-          })
-          return true
+        terminateTasks({ 
+            responseMethod: 'sendResponse',
+            sendResponse 
+        })
+        return true
     } else if (request.type === 'SET_API_KEY') {
         handleSetApiKey(request.apiKey, sendResponse)
         return true
@@ -139,12 +138,6 @@ function terminateTasks(options: {
         if (currentAIProcess) {
             currentAIProcess.abort()
             currentAIProcess = null
-        }
-        
-        // 中断当前的 AI 流式请求
-        if (currentAbortController) {
-            currentAbortController.abort()
-            currentAbortController = null
         }
         
         const connectionManager = LongConnectionManager.getInstance()
@@ -441,76 +434,70 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                 }
                 return
             }
-            const aiClient = new DoubaoAIClient(apiKey)
+            // 使用 AIService 实例
+            const aiService = AIService.getInstance();
             
-            // 创建 AbortController 用于中断请求
-            currentAbortController = new AbortController()
+            // 设置当前AI进程（用于中断）
+            currentAIProcess = {
+                abort: () => aiService.terminate()
+            };
             
-            // 使用流式 API
-            let isFirstChunk = true
-            await aiClient.sendMessageStream(
-                [
-                    {
-                        role: 'system',
-                        content: '你是一个专业的网页分析和开发助手，专门帮助用户完成网页相关的任务。你需要分析页面结构、CSS样式、DOM元素等，并提供解决方案。请始终使用中文回答用户的问题。无论用户使用什么语言提问，都要用中文回复。'
-                    },
-                    {
-                        role: 'user',
-                        content: finalPrompt
-                    }
-                ],
-                    // onChunk - 处理每个数据块
-                    (chunk: string) => {
+            // 使用AIService发送消息
+            await aiService.sendMessageWithStream(
+                finalPrompt, // 将整个finalPrompt作为问题发送
+                undefined,   // 没有单独的domData
+                undefined,   // 没有单独的cssData
+                {
+                    // 处理每个数据块
+                    onChunk: (chunk: string, isFirst: boolean) => {
                         if (panelPort) {
                             try {
                                 panelPort.postMessage({
                                     type: 'STREAMING_CONTENT',
                                     content: chunk,
-                                    isFirstChunk: isFirstChunk,
+                                    isFirstChunk: isFirst,
                                     requestId: requestId
-                                })
+                                });
                             } catch (error) {
-                                console.error('发送流式内容失败: ', error)
-                                panelPort = null
+                                console.error('发送流式内容失败: ', error);
+                                panelPort = null;
                             }
                         }
-                        isFirstChunk = false
                     },
-                    // onComplete - 流式完成
-                    () => {
-                        currentAbortController = null
+                    // 完成回调
+                    onComplete: () => {
+                        currentAIProcess = null;
                         if (panelPort) {
                             try {
                                 panelPort.postMessage({
                                     type: 'STREAMING_COMPLETE',
                                     requestId: requestId
-                                })
+                                });
                             } catch (error) {
-                                console.error('发送完成消息失败: ', error)
+                                console.error('发送完成消息失败: ', error);
                             }
-                            panelPort = null
+                            panelPort = null;
                         }
                     },
-                    // onError - 错误处理
-                    (error: Error) => {
-                        currentAbortController = null
-                        console.error('流式 API 调用失败: ', error)
+                    // 错误处理
+                    onError: (error: Error) => {
+                        currentAIProcess = null;
+                        console.error('AI 调用失败: ', error);
                         if (panelPort) {
                             try {
                                 panelPort.postMessage({
                                     type: 'ERROR',
                                     error: 'AI 生成失败: ' + error.message,
                                     requestId: requestId
-                                })
+                                });
                             } catch (sendError) {
-                                console.error('发送错误消息失败: ', sendError)
+                                console.error('发送错误消息失败: ', sendError);
                             }
-                            panelPort = null
+                            panelPort = null;
                         }
-                    },
-                    // abortSignal - 中断信号
-                    currentAbortController.signal
-                )
+                    }
+                }
+            );
             } catch (error) {
                 console.error('AI 调用过程中出错: ', error)
                 if (panelPort) {
@@ -542,71 +529,30 @@ async function toolboxAnalysis(question: string, panelPort?: chrome.runtime.Port
     targetElement?: string
 }> {
     try {
-        const apiKey = await getApiKeyFromStorage()
-        if (!apiKey || apiKey.trim() === '') {
-            // API 密钥无效，通知 panel
-            if (panelPort) {
-                try {
-                    panelPort.postMessage({
-                        type: 'ERROR',
-                        content: 'API 密钥未配置，请在设置中配置豆包 AI API 密钥',
-                        timestamp: new Date().toISOString(),
-                        id: Date.now()
-                    })
-                } catch (error) {
-                    console.error('发送 API 密钥错误通知失败: ', error)
+        // 使用 AIService 实例
+        const aiService = AIService.getInstance();
+        
+        // 使用AIService的analyzeQuestionRequirements方法
+        const result = await aiService.analyzeQuestionRequirements(
+            question,
+            (errorMessage: string) => {
+                if (panelPort) {
+                    try {
+                        panelPort.postMessage({
+                            type: 'ERROR',
+                            content: errorMessage,
+                            timestamp: new Date().toISOString(),
+                            id: Date.now()
+                        });
+                    } catch (error) {
+                        console.error('发送错误通知失败: ', error);
+                    }
                 }
             }
-        }
-        
-        const aiClient = new DoubaoAIClient(apiKey)
-        
-        const analysisPrompt = `
-分析用户的问题，判断是否需要使用 DOM 分析工具和 CSS 分析工具来回答。
-
-用户问题：${question}
-
-请返回一个 JSON 格式的分析结果，包含以下字段：
-- shouldAnalyzeDOM: boolean - 是否需要分析页面 DOM 结构
-- shouldAnalyzeCSS: boolean - 是否需要分析页面 CSS 样式
-- targetElement: string (可选) - 如果需要分析特定元素，提供 CSS 选择器
-
-判断标准：
-1. 如果问题涉及页面结构、元素内容、文本信息等，需要 DOM 分析
-2. 如果问题涉及样式、布局、设计等，需要 CSS 分析
-3. 如果问题涉及特定元素，提供准确的选择器
-
-只返回 JSON，不要其他内容。`
-
-        const messages: ChatMessage[] = [
-            {
-                role: 'system',
-                content: '你是一个专业的分析助手，擅长判断用户问题的分析需求。只返回 JSON 格式的结果。'
-            },
-            {
-                role: 'user',
-                content: analysisPrompt
-            }
-        ]
-
-        const response = await aiClient.sendMessage(messages)
-        console.log('AI 原始响应:', JSON.stringify(response, null, 2))
-        
-        try {
-            // 从 ChatCompletionResponse 中提取 content
-            const content = response.choices?.[0]?.message?.content || ''
-            const result = JSON.parse(content)
-            
-            const finalResult = {
-                shouldAnalyzeDOM: Boolean(result.shouldAnalyzeDOM),
-                shouldAnalyzeCSS: Boolean(result.shouldAnalyzeCSS),
-                targetElement: result.targetElement || undefined
-            }
-            return finalResult
-        } catch (parseError) {
-            return { shouldAnalyzeDOM: false, shouldAnalyzeCSS: false }
-        }
+        );
+        return result;
     } catch (error) {
-        return { shouldAnalyzeDOM: false, shouldAnalyzeCSS: false }
+        console.error('分析工具函数执行失败: ', error);
+        return { shouldAnalyzeDOM: false, shouldAnalyzeCSS: false };
     }
 }

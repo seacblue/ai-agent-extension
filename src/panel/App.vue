@@ -58,27 +58,12 @@
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { generateId } from '../shared/utils'
 import { MessageService } from '../shared/services/messageService'
+import { Message, ElementInfo } from '../shared/types/chat'
 
 import MessageItem from './components/messageItem.vue'
 import MessageInput from './components/messageInput.vue'
 import ApiKeyModal from './components/apiKeyModal.vue'
 import PopupMessage from './components/popupMessage.vue'
-
-interface Message {
-    id: number
-    type: 'USER' | 'ASSISTANT' | 'THINKING'
-    content: string
-    timestamp: string
-    status: 'success' | 'error'
-    completed?: boolean
-    thinkingSteps?: ThinkingStep[]
-}
-
-interface ThinkingStep {
-    id: number
-    content: string
-    timestamp: string
-}
 
 const messageInputRef = ref<InstanceType<typeof MessageInput>>()
 const messages = reactive<Message[]>([])
@@ -147,13 +132,7 @@ const messageService = new MessageService({
 })
 
 // 元素信息存储
-const selectedElement = ref<{
-    id: string
-    elementData: any
-    timestamp: number
-} | null>(null)
-
-
+const selectedElement = ref<ElementInfo | null>(null)
 
 const removeSelectedElement = () => { selectedElement.value = null }
 const sendMessage = async () => {

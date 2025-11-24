@@ -66,23 +66,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import MarkdownRenderer from './markdownRenderer.vue'
-
-// 接口定义
-interface ThinkingStep {
-    id: number
-    content: string
-    timestamp: string
-}
-
-interface Message {
-    id: number
-    type: 'USER' | 'ASSISTANT' | 'THINKING'
-    content: string
-    timestamp: string
-    status: 'success' | 'error'
-    completed?: boolean
-    thinkingSteps?: ThinkingStep[]
-}
+import { Message } from '../../shared/types/chat'
 
 // Props
 interface Props {
