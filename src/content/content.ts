@@ -39,6 +39,8 @@ chrome.runtime.onMessage.addListener(async (request, _sender, sendResponse) => {
         return true;
     } else {
         console.log('Content Script 收到未知消息类型: ', request.type)
+        // 对于未知类型的消息，发送响应以避免通道错误
+        sendResponse({ type: 'error', message: '未知的消息类型' });
         return false
     }
 })

@@ -1,5 +1,5 @@
 // 豆包 AI API 客户端
-import { API_CONFIG } from './API';
+import { API_CONFIG } from './api';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';

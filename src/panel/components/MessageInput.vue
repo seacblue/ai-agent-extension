@@ -2,7 +2,7 @@
   <div class="input-area">
     <!-- 元素信息显示区域 -->
     <div v-if="selectedElement" class="attachment-content">
-      <div class="element-name">{{ selectedElement.summary }}</div>
+      <div class="element-name">{{ MessageService.generateElementSummary(selectedElement.elementData) }}</div>
       <div class="element-tags">
         <span class="element-tag">{{ selectedElement.elementData.tagName }}</span>
         <span v-if="selectedElement.elementData.id" class="element-id">#{{ selectedElement.elementData.id }}</span>
@@ -41,13 +41,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from 'vue'
+import { MessageService } from '../../shared/services/messageService'
 
 const props = defineProps<{
   isSending: boolean
   selectedElement?: {
     id: string
     elementData: any
-    summary: string
     timestamp: number
   } | null
 }>()

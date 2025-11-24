@@ -1,6 +1,6 @@
 import { toolManager } from './toolManager';
 import { domTool } from './getDOM';
-import { cssAnalyzerTool } from './CSSAnalyzer';
+import { cssAnalyzerTool } from './cssAnalyzer';
 
 // 注册所有工具
 export function registerAllTools() {

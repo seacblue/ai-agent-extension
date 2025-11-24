@@ -1,6 +1,6 @@
 // 导入 AI 客户端
-import { DoubaoAIClient, ChatMessage } from '../shared/services/AIClient';
-import { getApiKeyFromStorage, handleSetApiKey, handleGetApiKey, handleClearApiKey } from '../shared/services/API';
+import { DoubaoAIClient, ChatMessage } from '../shared/services/aiClient';
+import { getApiKeyFromStorage, handleSetApiKey, handleGetApiKey, handleClearApiKey } from '../shared/services/api';
 
 // 存储当前活跃的定时器和 AI 客户端
 let activeTimers: NodeJS.Timeout[] = []
@@ -147,8 +147,10 @@ chrome.runtime.onInstalled.addListener(async (_details) => {
 // 监听来自 DevTools Panel 和 Content Script 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'ASK_QUESTION') {
-        handleQuestion(request.question, request.requestId, sender, sendResponse)
-        return true
+        // 对于ASK_QUESTION请求，使用异步处理但立即返回成功，因为实际响应会通过长连接发送
+        sendResponse({ type: 'processing', message: '问题处理中，通过长连接返回结果' })
+        handleQuestion(request.question, request.requestId, sender, () => {})
+        return false // 不需要保持通道开放，因为使用长连接进行异步通信
     } else if (request.type === 'GET_TAB_INFO') {
         handleTabInfo(sender.tab?.id, sendResponse)
         return true
@@ -165,6 +167,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         handleClearApiKey(sendResponse)
         return true
     }
+    // 对于未知类型的消息，也要发送响应以避免通道错误
+    sendResponse({ type: 'unknown', message: '未知的消息类型' })
+    return false
 })
 
 // 管理所有 Panel 连接
@@ -306,7 +311,7 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                 } else {
                     console.warn('连接已断开或无效，无法发送确认')
                     panelPort = null
-                    // 从panelPorts中移除断开的连接
+                    // 从 panelPorts 中移除断开的连接
                     const portId = Array.from(panelPorts.keys())[0]
                     if (portId) {
                         panelPorts.delete(portId)
@@ -315,7 +320,7 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
             } catch (error) {
                 console.error('发送连接确认失败: ', error)
                 panelPort = null
-                // 从panelPorts中移除断开的连接
+                // 从 panelPorts 中移除断开的连接
                 const portId = Array.from(panelPorts.keys())[0]
                 if (portId) {
                     panelPorts.delete(portId)
@@ -395,6 +400,21 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
 
         // 构建 Prompt
         let promptParts = ['你是一个专业的AI开发者助手，擅长分析网页结构和回答技术问题。']
+        
+        function truncateData(data: any, maxLength: number = 10000): string {
+            try {
+                let jsonString = JSON.stringify(data, null, 2);
+                if (jsonString.length > maxLength) {
+                    console.log(`数据被截断，原始长度: ${jsonString.length}，截断后长度: ${maxLength}`);
+                    // 保留数据的主要结构
+                    return jsonString.substring(0, maxLength - 100) + '... [数据被截断以避免token超限]';
+                }
+                return jsonString;
+            } catch (e) {
+                console.error('数据序列化失败:', e);
+                return '[数据序列化失败]';
+            }
+        }
 
         if (analysisDecision.shouldAnalyzeDOM) {
             try {
@@ -414,13 +434,13 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                         keywords: ['getDOM'],
                         params: {
                             domOptions: {
-                                includeStyles: true,
+                                includeStyles: false,
                                 includeAttributes: true,
-                                maxDepth: 8
+                                maxDepth: 5
                             },
                             htmlOptions: {
                                 format: true,
-                                includeDoctype: true
+                                includeDoctype: false
                             }
                         },
                         context: {
@@ -436,7 +456,8 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                 console.log('DOM 分析完成')
                 
                 if (domResult.success && domResult.results && domResult.results.length > 0) {
-                    promptParts.push(`DOM 分析数据：\n${JSON.stringify(domResult.results[0].data, null, 2)}`)
+                    const truncatedDomData = truncateData(domResult.results[0].data, 8000);
+                    promptParts.push(`DOM 分析数据：\n${truncatedDomData}`)
                 } else {
                     console.warn('DOM 分析未返回有效结果')
                 }
@@ -464,7 +485,7 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                         params: {
                             naturalQuery: question,
                             targetElement: analysisDecision.targetElement,
-                            includeAll: true
+                            includeAll: false
                         },
                         context: {
                             tabId,
@@ -479,8 +500,9 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
                 console.log('CSS 分析完成')
                 
                 if (cssResult.success && cssResult.results && cssResult.results.length > 0) {
-                    console.log(`CSS分析数据：\n${JSON.stringify(cssResult.results[0].data, null, 2)}`)
-                    promptParts.push(`CSS分析数据：\n${JSON.stringify(cssResult.results[0].data, null, 2)}`)
+                    const truncatedCssData = truncateData(cssResult.results[0].data, 5000);
+                    console.log(`CSS分析数据长度: ${truncatedCssData.length}`);
+                    promptParts.push(`CSS分析数据：\n${truncatedCssData}`)
                 } else {
                     console.warn('CSS 分析未返回有效结果')
                 }
@@ -492,6 +514,15 @@ async function handleQuestion(question: string, requestId: string, sender: chrom
         // 添加用户问题到 Prompt
         promptParts.push(`用户问题：${question}`)
         promptParts.push('请基于以上提供的分析数据（如果有）来回答用户的问题。如果没有相关数据，请直接回答用户的问题。')
+        const fullPrompt = promptParts.join('\n\n');
+        if (fullPrompt.length > 20000) {
+            console.log(`警告：整体提示词长度 ${fullPrompt.length} 字符，可能接近 token 限制`);
+            // 如果提示词太长，可以进一步精简或只保留最相关部分
+            if (fullPrompt.length > 30000) {
+                const emergencyTruncated = fullPrompt.substring(0, 30000) + '...\n[提示词已被截断以避免token超限]';
+                promptParts = [emergencyTruncated];
+            }
+        }
 
         // 组合完整的 Prompt
         const finalPrompt = promptParts.join('\n\n')

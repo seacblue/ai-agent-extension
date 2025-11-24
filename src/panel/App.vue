@@ -61,7 +61,7 @@ import { MessageService } from '../shared/services/messageService'
 
 import MessageItem from './components/messageItem.vue'
 import MessageInput from './components/messageInput.vue'
-import ApiKeyModal from './components/APIKeyModal.vue'
+import ApiKeyModal from './components/apiKeyModal.vue'
 import PopupMessage from './components/popupMessage.vue'
 
 interface Message {
@@ -116,9 +116,8 @@ const messageService = new MessageService({
                 return
             }
         }
-        
-        // 正常添加新消息
         messages.push(message)
+        nextTick(() => scrollToBottom())
     },
     onStreamingStarted: () => {
         isStreaming.value = true
@@ -151,29 +150,14 @@ const messageService = new MessageService({
 const selectedElement = ref<{
     id: string
     elementData: any
-    summary: string
     timestamp: number
 } | null>(null)
 
-// 生成元素信息摘要
-const generateElementSummary = (elementData: any): string => {
-    if (!elementData) return '未知元素'
-    
-    const tagName = elementData.tagName || '未知标签'
-    const className = elementData.className ? `.${elementData.className.split(' ').join('.')}` : ''
-    const id = elementData.id ? `#${elementData.id}` : ''
-    const text = elementData.text ? elementData.text.substring(0, 20) + (elementData.text.length > 20 ? '...' : '') : ''
-    
-    return `${tagName}${id}${className}${text ? ` "${text}"` : ''}`
-}
 
-// 移除选中的元素
+
 const removeSelectedElement = () => { selectedElement.value = null }
-
 const sendMessage = async () => {
     if (!messageInputRef.value?.getInputText().trim()) return
-    
-    // 获取输入框内容并清空
     const userInputText = messageInputRef.value.getInputText()
     messageInputRef.value.clearInput()
     await messageService.sendMessage(
@@ -196,7 +180,7 @@ const handleElementSelector = () => {
     console.log('启动元素选择器')
     
     try {
-        // 获取当前标签页ID
+        // 获取当前标签页 ID
         let tabId: number | null = null
         
         if (chrome.devtools && chrome.devtools.inspectedWindow) {
@@ -246,18 +230,6 @@ const handleElementSelector = () => {
     }
 }
 
-const handleBackgroundResponse = (response: any) => {
-    if (response?.type === 'ELEMENT_SELECTED_RESULT') {
-        if (messageInputRef.value) {
-            messageInputRef.value.resetElementSelector()
-        }
-        return
-    }
-    
-    // 其他响应交给消息服务处理
-    messageService.handleBackgroundResponse(response)
-}
-
 // 滚动到底部函数
 const scrollToBottom = async () => {
     await nextTick()
@@ -304,8 +276,6 @@ const showPopupMessage = (message: string, type: 'success' | 'error' = 'success'
         popupMessageRef.value.showPopupMessage(message, type)
     }
 }
-
-// API 密钥相关方法
 const openApiKeySettings = async () => { showApiKeySettings.value = true }
 const closeApiKeySettings = () => { showApiKeySettings.value = false }
 const onApiKeySaved = () => {
@@ -335,31 +305,32 @@ const checkApiKeyStatus = async () => {
 
 onMounted(() => {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-        // 处理来自 Content Script 的元素选择结果
         if (message.type === 'ELEMENT_SELECTED_RESULT') {
             console.log('Panel 收到消息: ', message.type)
             console.log('收到元素选择结果: ', message.elementData)
-            
             // 存储元素信息
             selectedElement.value = {
                 id: generateId().toString(),
                 elementData: message.elementData,
-                summary: generateElementSummary(message.elementData),
                 timestamp: Date.now()
             }
-            
             console.log('元素信息已存储: ', selectedElement.value)
-            
             if (messageInputRef.value) {
                 messageInputRef.value.resetElementSelector()
             }
-            
             sendResponse({ success: true })
-            return true // 保持消息通道开放
+            return false // 同步响应，不需要保持通道开放
         } else {
-            // 处理来自 Background 的其他消息
-            handleBackgroundResponse(message)
-            return true // 保持消息通道开放
+            if (message?.type === 'ELEMENT_SELECTED_RESULT') {
+                if (messageInputRef.value) {
+                    messageInputRef.value.resetElementSelector()
+                }
+                sendResponse({ success: true })
+                return false
+            }
+            messageService.handleBackgroundResponse(message)
+            sendResponse({ success: true, handledByMessageService: true })
+            return false // 不需要保持通道开放，因为长连接用于异步通信
         }
     })
 

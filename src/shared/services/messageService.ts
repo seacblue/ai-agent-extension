@@ -20,7 +20,6 @@ export interface ThinkingStep {
 export interface SelectedElement {
   id: string
   elementData: any
-  summary: string
   timestamp: number
 }
 
@@ -37,6 +36,20 @@ export interface MessageServiceOptions {
  */
 export class MessageService {
   private currentRequestId: string | null = null
+  
+  /**
+   * 生成元素信息摘要
+   */
+  public static generateElementSummary(elementData: any): string {
+    if (!elementData) return '未知元素'
+    
+    const tagName = elementData.tagName || '未知标签'
+    const className = elementData.className ? `.${elementData.className.split(' ').join('.')}` : ''
+    const id = elementData.id ? `#${elementData.id}` : ''
+    const text = elementData.text ? elementData.text.substring(0, 20) + (elementData.text.length > 20 ? '...' : '') : ''
+    
+    return `${tagName}${id}${className}${text ? ` "${text}"` : ''}`
+  }
   private panelPort: chrome.runtime.Port | null = null
   private connectionRetryCount = 0
   private readonly baseConnectionRetryDelay = 1000 // 基础重连延迟
@@ -189,9 +202,9 @@ export class MessageService {
     
     // 构建包含元素信息的完整问题
     let fullQuestion = userInputText
-    if (selectedElement) {
+    if (selectedElement && selectedElement.elementData) {
       const elementInfo = selectedElement.elementData
-      const elementSummary = selectedElement.summary
+      const elementSummary = MessageService.generateElementSummary(elementInfo)
       
       // 将元素信息作为上下文附加到问题中
       fullQuestion = `${userInputText}
@@ -207,7 +220,7 @@ export class MessageService {
 - 尺寸: ${elementInfo.rect?.width || 0}x${elementInfo.rect?.height || 0}
 ---`
       
-      console.log('将元素信息附加到问题中: ', selectedElement.summary)
+      console.log('将元素信息附加到问题中: ', elementSummary)
     }
     
     // 添加一个小延迟确保 UI 更新
