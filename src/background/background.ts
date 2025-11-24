@@ -1,10 +1,7 @@
 // 导入服务
 import { getApiKeyFromStorage, handleSetApiKey, handleGetApiKey, handleClearApiKey } from '../shared/services/api';
 import { LongConnectionManager } from '../shared/services/longConnectionManager';
-import { AIService } from '../shared/services/aiService';
-
-// 存储当前活跃的连接管理器
-let currentAIProcess: { abort: () => void } | null = null
+import { AIProcessService, TerminateOptions } from '../shared/services/aiProcess';
 
 // 扩展启动或安装时获取并保持 API Key
 chrome.runtime.onStartup.addListener(async () => {
@@ -24,9 +21,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ type: 'processing', message: '问题处理中，通过长连接返回结果' })
         handleQuestion(request.question, request.requestId, sender, () => {})
         return false // 不需要保持通道开放，因为使用长连接进行异步通信
-    } else if (request.type === 'GET_TAB_INFO') {
-        handleTabInfo(sender.tab?.id, sendResponse)
-        return true
     } else if (request.type === 'TERMINATE_PROCESS') {
         terminateTasks({ 
             responseMethod: 'sendResponse',
@@ -99,7 +93,6 @@ chrome.runtime.onConnect.addListener((port) => {
             }
         } catch (error) {
             console.error('发送 Panel 连接确认失败: ', error)
-            // 发生错误时从集合中移除 port
             if (panelPorts.has(portId)) {
                 panelPorts.delete(portId)
             }
@@ -107,452 +100,42 @@ chrome.runtime.onConnect.addListener((port) => {
     }
 })
 
-async function handleTabInfo(tabId: number | undefined, sendResponse: (response: any) => void) {
-    try {
-        if (!tabId) {
-            sendResponse({ error: '无法获取标签页信息' })
-            return
-        }
-        
-        const tab = await chrome.tabs.get(tabId)
-        sendResponse({ 
-            title: tab.title,
-            url: tab.url,
-            id: tab.id
-        })
-    } catch (error) {
-        console.error('获取标签页信息失败: ', error)
-        sendResponse({ error: '获取标签页信息失败' })
-    }
-}
-
 // 处理终止请求
-function terminateTasks(options: {
-    responseMethod: 'sendResponse' | 'portMessage';
-    sendResponse?: (response: any) => void;
-    port?: chrome.runtime.Port;
-    requestId?: string;
-}) {
+function terminateTasks(options: TerminateOptions) {
     try {
-        // 中断当前 AI 进程
-        if (currentAIProcess) {
-            currentAIProcess.abort()
-            currentAIProcess = null
-        }
-        
-        const connectionManager = LongConnectionManager.getInstance()
-        connectionManager.cleanup()
-        
-        // 根据不同的响应方式返回结果
-        if (options.responseMethod === 'sendResponse' && options.sendResponse) {
-            options.sendResponse({
-                type: 'terminated',
-                message: '所有任务已终止',
-                status: 'success'
-            })
-        } else if (options.responseMethod === 'portMessage' && options.port) {
-            options.port.postMessage({
-                type: 'TERMINATE_RESPONSE',
-                success: true,
-                message: '所有任务已终止',
-                requestId: options.requestId
-            })
-        }
+        const aiProcessService = AIProcessService.getInstance();
+        aiProcessService.terminateTasks(options);
+        const connectionManager = LongConnectionManager.getInstance();
+        connectionManager.cleanup();
     } catch (error) {
-        console.error('处理终止请求失败: ', error)
-        
-        // 错误响应
+        console.error('终止任务失败: ', error);
         if (options.responseMethod === 'sendResponse' && options.sendResponse) {
             options.sendResponse({
                 type: 'error',
-                error: '终止任务失败: ' + (error as Error).message,
+                message: '终止任务失败: ' + (error as Error).message,
                 status: 'error'
-            })
-        } else if (options.responseMethod === 'portMessage' && options.port) {
-            options.port.postMessage({
-                type: 'TERMINATE_RESPONSE',
-                success: false,
-                error: '终止任务失败: ' + (error as Error).message,
-                requestId: options.requestId
-            })
+            });
         }
     }
 }
 
 async function handleQuestion(question: string, requestId: string, sender: chrome.runtime.MessageSender, sendResponse: (response: any) => void) {
-    let panelPort: chrome.runtime.Port | null = null
-    
     try {
-        // 检查是否已经有 Panel 连接
-        const existingPorts = Array.from(panelPorts.values())
-        if (existingPorts.length > 0) {
-            // 使用现有的 Panel 连接
-            panelPort = existingPorts[0]
-            console.log('使用现有的 Panel 连接')
-            
-            // 发送连接确认
-            try {
-                // 在发送消息前检查 port 是否有效
-                if (panelPort.sender) {
-                    panelPort.postMessage({
-                        type: 'CONNECTION_ACK',
-                        portId: Array.from(panelPorts.keys())[0],
-                        timestamp: new Date().toISOString()
-                    })
-                    console.log('发送连接确认成功: ', Array.from(panelPorts.keys())[0])
-                } else {
-                    console.warn('连接已断开或无效，无法发送确认')
-                    panelPort = null
-                    // 从 panelPorts 中移除断开的连接
-                    const portId = Array.from(panelPorts.keys())[0]
-                    if (portId) {
-                        panelPorts.delete(portId)
-                    }
-                }
-            } catch (error) {
-                console.error('发送连接确认失败: ', error)
-                panelPort = null
-                // 从 panelPorts 中移除断开的连接
-                const portId = Array.from(panelPorts.keys())[0]
-                if (portId) {
-                    panelPorts.delete(portId)
-                }
-            }
-        } else {
-            // 建立与 Panel 的长连接用于发送多个响应
-            panelPort = chrome.runtime.connect({ name: 'question-response' })
-            
-            // 设置连接超时
-            const connectionTimeout = setTimeout(() => {
-                if (panelPort) {
-                    console.warn('Panel 连接超时，断开连接')
-                    panelPort = null
-                }
-            }, 5000)
-            
-            // 等待 Panel 的连接确认
-            const connectionAckPromise = new Promise<void>((resolve, reject) => {
-                let ackReceived = false
-                
-                panelPort!.onMessage.addListener((message) => {
-                    if (message.type === 'CONNECTION_ACK') {
-                        ackReceived = true
-                        console.log('收到 Panel 连接确认: ', message.portId)
-                        clearTimeout(connectionTimeout)
-                        resolve()
-                    }
-                })
-                
-                panelPort!.onDisconnect.addListener(() => {
-                    clearTimeout(connectionTimeout)
-                    if (!ackReceived) {
-                        if (chrome.runtime.lastError) {
-                            console.error('Panel 连接断开: ', chrome.runtime.lastError.message)
-                        }
-                        reject(new Error('Panel 连接断开，未收到确认'))
-                    }
-                })
-            })
-            
-            // 等待连接确认或超时
-            await connectionAckPromise
-            console.log('Background 与 Panel 长连接建立成功')
-            
-            // 重新设置断开监听器
-            panelPort.onDisconnect.addListener(() => {
-                console.log('Panel 连接已断开')
-                panelPort = null
-            })
-        }
-        
-        const analysisDecision = await toolboxAnalysis(question, panelPort)
-
-        // 获取标签页信息
-        let tabId = (sender as any).tabId || sender.tab?.id
-        if (!tabId) {
-            const tabs = await chrome.tabs.query({})
-            const activeTab = tabs.find(tab => tab.active) || tabs[0]
-            tabId = activeTab?.id
-        }
-        
-        if (!tabId) {
-            if (panelPort) {
-                try {
-                    panelPort.postMessage({
-                        type: 'ERROR',
-                        error: '无法获取当前标签页信息，请确保在网页上打开 DevTools',
-                        requestId: requestId
-                    })
-                } catch (error) {
-                    console.error('发送标签页错误失败: ', error)
-                }
-            }
-            return
-        }
-
-        // 构建 Prompt
-        let promptParts = ['你是一个专业的AI开发者助手，擅长分析网页结构和回答技术问题。']
-        
-        function truncateData(data: any, maxLength: number = 10000): string {
-            try {
-                let jsonString = JSON.stringify(data, null, 2);
-                if (jsonString.length > maxLength) {
-                    console.log(`数据被截断，原始长度: ${jsonString.length}，截断后长度: ${maxLength}`);
-                    // 保留数据的主要结构
-                    return jsonString.substring(0, maxLength - 100) + '... [数据被截断以避免token超限]';
-                }
-                return jsonString;
-            } catch (e) {
-                console.error('数据序列化失败:', e);
-                return '[数据序列化失败]';
-            }
-        }
-
-        if (analysisDecision.shouldAnalyzeDOM) {
-            try {
-                if (panelPort) {
-                    panelPort.postMessage({
-                        type: 'THINKING',
-                        content: '正在使用 DOM 分析工具...',
-                        requestId: requestId
-                    })
-                }
-
-                const connectionManager = LongConnectionManager.getInstance()
-                const domResult = await connectionManager.sendLongConnectionRequest(
-                    tabId!,
-                    'EXECUTE_TOOLS',
-                    {
-                        keywords: ['getDOM'],
-                        params: {
-                            domOptions: {
-                                includeStyles: false,
-                                includeAttributes: true,
-                                maxDepth: 5
-                            },
-                            htmlOptions: {
-                                format: true,
-                                includeDoctype: false
-                            }
-                        },
-                        context: {
-                            tabId,
-                            question,
-                            timestamp: new Date().toISOString()
-                        }
-                    },
-                    'dom-analysis-result',
-                    15000
-                )
-                
-                console.log('DOM 分析完成')
-                
-                if (domResult.success && domResult.results && domResult.results.length > 0) {
-                    const truncatedDomData = truncateData(domResult.results[0].data, 8000);
-                    promptParts.push(`DOM 分析数据：\n${truncatedDomData}`)
-                } else {
-                    console.warn('DOM 分析未返回有效结果')
-                }
-            } catch (error) {
-                console.error('DOM 分析失败:', error)
-            }
-        }
-
-        if (analysisDecision.shouldAnalyzeCSS) {
-            try {
-                if (panelPort) {
-                    panelPort.postMessage({
-                        type: 'THINKING',
-                        content: '正在使用 CSS 分析工具...',
-                        requestId: requestId
-                    })
-                }
-
-                const connectionManager = LongConnectionManager.getInstance()
-                const cssResult = await connectionManager.sendLongConnectionRequest(
-                    tabId!,
-                    'EXECUTE_TOOLS',
-                    {
-                        keywords: ['cssAnalyzer'],
-                        params: {
-                            naturalQuery: question,
-                            targetElement: analysisDecision.targetElement,
-                            includeAll: false
-                        },
-                        context: {
-                            tabId,
-                            question,
-                            timestamp: new Date().toISOString()
-                        }
-                    },
-                    'css-analysis-result',
-                    15000
-                )
-                
-                console.log('CSS 分析完成')
-                
-                if (cssResult.success && cssResult.results && cssResult.results.length > 0) {
-                    const truncatedCssData = truncateData(cssResult.results[0].data, 5000);
-                    promptParts.push(`CSS 分析数据：\n${truncatedCssData}`)
-                } else {
-                    console.warn('CSS 分析未返回有效结果')
-                }
-            } catch (error) {
-                console.error('CSS 分析失败:', error)
-            }
-        }
-
-        // 添加用户问题到 Prompt
-        promptParts.push(`用户问题：${question}`)
-        promptParts.push('请基于以上提供的分析数据（如果有）来回答用户的问题。如果没有相关数据，请直接回答用户的问题。')
-        const fullPrompt = promptParts.join('\n\n');
-        if (fullPrompt.length > 20000) {
-            console.log(`警告：整体提示词长度 ${fullPrompt.length} 字符，可能接近 token 限制`);
-            // 如果提示词太长，可以进一步精简或只保留最相关部分
-            if (fullPrompt.length > 30000) {
-                const emergencyTruncated = fullPrompt.substring(0, 30000) + '...\n[提示词已被截断以避免token超限]';
-                promptParts = [emergencyTruncated];
-            }
-        }
-
-        // 组合完整的 Prompt
-        const finalPrompt = promptParts.join('\n\n')
-        // 丢给 AI
-        try {
-            const apiKey = await getApiKeyFromStorage()
-            if (!apiKey || apiKey.trim() === '') {
-                if (panelPort) {
-                    try {
-                        panelPort.postMessage({
-                            type: 'ERROR',
-                            error: 'API 密钥未配置，请在设置中配置豆包 AI API 密钥',
-                            requestId: requestId
-                        })
-                    } catch (error) {
-                        console.error('发送 API 密钥错误失败: ', error)
-                    }
-                }
-                return
-            }
-            // 使用 AIService 实例
-            const aiService = AIService.getInstance();
-            
-            // 设置当前AI进程（用于中断）
-            currentAIProcess = {
-                abort: () => aiService.terminate()
-            };
-            
-            // 使用AIService发送消息
-            await aiService.sendMessageWithStream(
-                finalPrompt, // 将整个finalPrompt作为问题发送
-                undefined,   // 没有单独的domData
-                undefined,   // 没有单独的cssData
-                {
-                    // 处理每个数据块
-                    onChunk: (chunk: string, isFirst: boolean) => {
-                        if (panelPort) {
-                            try {
-                                panelPort.postMessage({
-                                    type: 'STREAMING_CONTENT',
-                                    content: chunk,
-                                    isFirstChunk: isFirst,
-                                    requestId: requestId
-                                });
-                            } catch (error) {
-                                console.error('发送流式内容失败: ', error);
-                                panelPort = null;
-                            }
-                        }
-                    },
-                    // 完成回调
-                    onComplete: () => {
-                        currentAIProcess = null;
-                        if (panelPort) {
-                            try {
-                                panelPort.postMessage({
-                                    type: 'STREAMING_COMPLETE',
-                                    requestId: requestId
-                                });
-                            } catch (error) {
-                                console.error('发送完成消息失败: ', error);
-                            }
-                            panelPort = null;
-                        }
-                    },
-                    // 错误处理
-                    onError: (error: Error) => {
-                        currentAIProcess = null;
-                        console.error('AI 调用失败: ', error);
-                        if (panelPort) {
-                            try {
-                                panelPort.postMessage({
-                                    type: 'ERROR',
-                                    error: 'AI 生成失败: ' + error.message,
-                                    requestId: requestId
-                                });
-                            } catch (sendError) {
-                                console.error('发送错误消息失败: ', sendError);
-                            }
-                            panelPort = null;
-                        }
-                    }
-                }
-            );
-            } catch (error) {
-                console.error('AI 调用过程中出错: ', error)
-                if (panelPort) {
-                    try {
-                        panelPort.postMessage({
-                            type: 'ERROR',
-                            error: 'AI 调用失败: ' + (error as Error).message,
-                            requestId: requestId
-                        })
-                    } catch (sendError) {
-                        console.error('发送错误消息失败: ', sendError)
-                    }
-                    panelPort = null
-                }
-            }
+        const aiProcessService = AIProcessService.getInstance();
+        await aiProcessService.handleQuestion({
+            question,
+            requestId,
+            sender,
+            sendResponse,
+            panelPorts,
+            getApiKeyFromStorage,
+            LongConnectionManager
+        });
     } catch (error) {
-        console.error('处理问题时出错: ', error)
+        console.error('调用 AIProcessService 处理问题失败: ', error);
         sendResponse({
             success: false,
             error: error instanceof Error ? error.message : '处理问题时出现未知错误'
-        })
-    }
-}
-
-// 合并的页面分析判断函数
-async function toolboxAnalysis(question: string, panelPort?: chrome.runtime.Port | null): Promise<{
-    shouldAnalyzeDOM: boolean,
-    shouldAnalyzeCSS: boolean,
-    targetElement?: string
-}> {
-    try {
-        // 使用 AIService 实例
-        const aiService = AIService.getInstance();
-        
-        // 使用AIService的analyzeQuestionRequirements方法
-        const result = await aiService.analyzeQuestionRequirements(
-            question,
-            (errorMessage: string) => {
-                if (panelPort) {
-                    try {
-                        panelPort.postMessage({
-                            type: 'ERROR',
-                            content: errorMessage,
-                            timestamp: new Date().toISOString(),
-                            id: Date.now()
-                        });
-                    } catch (error) {
-                        console.error('发送错误通知失败: ', error);
-                    }
-                }
-            }
-        );
-        return result;
-    } catch (error) {
-        console.error('分析工具函数执行失败: ', error);
-        return { shouldAnalyzeDOM: false, shouldAnalyzeCSS: false };
+        });
     }
 }
