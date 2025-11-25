@@ -53,7 +53,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, nextTick } from 'vue';
-import { generateId } from '../shared/utils';
+import { generateId } from '../shared/services/timeService';
 import { MessageService } from '../shared/services/messageService';
 import { Message, ElementInfo } from '../shared/types/chat';
 

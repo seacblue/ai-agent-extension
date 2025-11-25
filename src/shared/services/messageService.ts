@@ -1,4 +1,4 @@
-import { generateId, getCurrentTimestamp } from '../utils/timeUtils';
+import { generateId, getCurrentTimestamp } from './timeService';
 
 // 类型定义
 export interface Message {

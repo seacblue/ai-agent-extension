@@ -37,8 +37,6 @@ function htmlPlugin() {
         fileName: 'panel.html',
         source: panelHtml,
       });
-
-      console.log('HTML 文件处理完成: devtools.html, panel.html');
     },
   };
 }
