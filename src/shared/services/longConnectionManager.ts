@@ -1,6 +1,6 @@
 class LongConnectionManager {
   private static instance: LongConnectionManager;
-  private pendingConnections: Map<
+  private pendingRequests: Map<
     string,
     {
       resolve: (value: any) => void;
@@ -30,12 +30,12 @@ class LongConnectionManager {
 
       // 设置超时
       const timeoutHandle = setTimeout(() => {
-        this.pendingConnections.delete(requestId);
+        this.pendingRequests.delete(requestId);
         reject(new Error(`${messageType} 长连接请求超时`));
       }, timeout);
 
       // 存储回调
-      this.pendingConnections.set(requestId, {
+      this.pendingRequests.set(requestId, {
         resolve,
         reject,
         timeout: timeoutHandle,
@@ -47,10 +47,10 @@ class LongConnectionManager {
           port.onMessage.addListener(message => {
             if (message.requestId === requestId) {
               // 清理超时和回调
-              const pending = this.pendingConnections.get(requestId);
+              const pending = this.pendingRequests.get(requestId);
               if (pending) {
                 clearTimeout(pending.timeout);
-                this.pendingConnections.delete(requestId);
+                this.pendingRequests.delete(requestId);
               }
 
               // 移除监听器
@@ -88,10 +88,10 @@ class LongConnectionManager {
         (response: any) => {
           if (chrome.runtime.lastError) {
             // 清理资源
-            const pending = this.pendingConnections.get(requestId);
+            const pending = this.pendingRequests.get(requestId);
             if (pending) {
               clearTimeout(pending.timeout);
-              this.pendingConnections.delete(requestId);
+              this.pendingRequests.delete(requestId);
             }
             chrome.runtime.onConnect.removeListener(listener);
             reject(new Error(chrome.runtime.lastError.message));
@@ -100,10 +100,10 @@ class LongConnectionManager {
             console.log(`${messageType} 正在处理中，等待长连接结果`);
           } else {
             // 直接返回结果
-            const pending = this.pendingConnections.get(requestId);
+            const pending = this.pendingRequests.get(requestId);
             if (pending) {
               clearTimeout(pending.timeout);
-              this.pendingConnections.delete(requestId);
+              this.pendingRequests.delete(requestId);
             }
             chrome.runtime.onConnect.removeListener(listener);
             resolve(response);
@@ -113,12 +113,12 @@ class LongConnectionManager {
     });
   }
 
-  // 清理所有待处理的连接
+  // 清理所有待处理的请求
   cleanup(): void {
-    this.pendingConnections.forEach(({ timeout }) => {
+    this.pendingRequests.forEach(({ timeout }) => {
       clearTimeout(timeout);
     });
-    this.pendingConnections.clear();
+    this.pendingRequests.clear();
   }
 }
 

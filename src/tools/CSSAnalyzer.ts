@@ -32,7 +32,7 @@ interface CSSAnalysisResult {
 }
 
 // CSS 分析器工具实现
-class CSSAnalyzerTool implements Tool {
+class CSSAnalyzerToolImpl implements Tool {
   name = 'cssAnalyzer';
   description = 'CSS 样式分析工具，获取元素的计算样式';
   keywords = ['CSS', '样式', 'computedStyle', '计算样式', '元素', '样式分析'];
@@ -228,4 +228,4 @@ class CSSAnalyzerTool implements Tool {
 }
 
 // 导出 CSS 分析器工具实例
-export const cssAnalyzerTool = new CSSAnalyzerTool();
+export const CSSAnalyzerTool = new CSSAnalyzerToolImpl();

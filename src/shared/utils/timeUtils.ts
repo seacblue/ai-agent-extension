@@ -3,7 +3,7 @@
  */
 
 /**
- * 生成唯一ID（基于时间戳）
+ * 生成唯一 ID（基于时间戳）
  */
 export function generateId(): number {
   return Date.now();
@@ -17,7 +17,7 @@ export function getCurrentTimestamp(): string {
 }
 
 /**
- * 获取ISO格式时间戳
+ * 获取 ISO 格式时间戳
  */
 export function getISOTimestamp(): string {
   return new Date().toISOString();

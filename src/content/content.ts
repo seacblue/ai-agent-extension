@@ -1,4 +1,4 @@
-import { registerAllTools, toolManager } from '../tools';
+import { registerAllTools, ToolManagerImpl } from '../tools';
 import { elementSelector } from '../shared/services/elementSelector';
 registerAllTools();
 
@@ -48,24 +48,21 @@ async function executeTools(
   context: any,
   requestId: string
 ) {
+  let connectionName = 'tool-analysis-result';
+  if (keywords.includes('getDOM')) {
+    connectionName = 'dom-analysis-result';
+  } else if (keywords.includes('cssAnalyzer')) {
+    connectionName = 'css-analysis-result';
+  }
   try {
-    const results = await toolManager.executeToolsByKeywords(
+    const results = await ToolManagerImpl.executeToolsByKeywords(
       keywords || [],
       params || {},
       context || {}
     );
 
-    // 确定连接名称
-    let connectionName = 'tool-analysis-result';
-    if (keywords.includes('getDOM')) {
-      connectionName = 'dom-analysis-result';
-    } else if (keywords.includes('cssAnalyzer')) {
-      connectionName = 'css-analysis-result';
-    }
-
     // 建立长连接并返回结果
     const port = chrome.runtime.connect({ name: connectionName });
-
     port.postMessage({
       type: connectionName.toUpperCase().replace('-', '_'),
       requestId: requestId,
@@ -80,17 +77,8 @@ async function executeTools(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('长连接工具执行失败: ', error);
 
-    // 确定连接名称
-    let connectionName = 'tool-analysis-result';
-    if (keywords.includes('getDOM')) {
-      connectionName = 'dom-analysis-result';
-    } else if (keywords.includes('cssAnalyzer')) {
-      connectionName = 'css-analysis-result';
-    }
-
     // 建立长连接并返回错误
     const port = chrome.runtime.connect({ name: connectionName });
-
     port.postMessage({
       type: connectionName.toUpperCase().replace('-', '_'),
       requestId: requestId,

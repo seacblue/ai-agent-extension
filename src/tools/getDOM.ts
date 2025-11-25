@@ -5,6 +5,7 @@ interface DOMOptions {
   includeStyles?: boolean;
   includeAttributes?: boolean;
   maxDepth?: number;
+  maxElements?: number;
   selector?: string;
 }
 
@@ -48,6 +49,7 @@ interface DOMStructure {
   domStructure: ElementStructure;
   semanticInfo: SemanticInfo;
   totalElements: number;
+  truncated?: boolean;
   error?: string;
   stack?: string;
 }
@@ -60,7 +62,7 @@ interface HTMLContent {
 }
 
 // DOM 工具实现
-class DOMTool implements Tool {
+class DOMToolImpl implements Tool {
   name = 'getDOM';
   description = '获取页面 DOM 结构、HTML 内容和语义化分析';
   keywords = [
@@ -134,15 +136,21 @@ class DOMTool implements Tool {
         includeStyles = false,
         includeAttributes = false,
         maxDepth = 10,
+        maxElements = 1000,
         selector,
       } = options;
 
-      // 递归获取元素结构
+      // 递归获取元素结构，带元素数量限制
       function getElementStructure(
         element: Element,
-        depth = 0
+        depth = 0,
+        elementCount = { value: 0 }
       ): ElementStructure | null {
-        if (depth > maxDepth) return null;
+        // 检查深度限制和元素数量限制
+        if (depth > maxDepth || elementCount.value >= maxElements) return null;
+
+        // 增加元素计数
+        elementCount.value++;
 
         const structure: ElementStructure = {
           tagName: element.tagName.toLowerCase(),
@@ -173,7 +181,12 @@ class DOMTool implements Tool {
 
         // 递归处理子元素
         for (const child of element.children) {
-          const childStructure = getElementStructure(child, depth + 1);
+          if (elementCount.value >= maxElements) break;
+          const childStructure = getElementStructure(
+            child,
+            depth + 1,
+            elementCount
+          );
           if (childStructure) {
             structure.children.push(childStructure);
           }
@@ -205,7 +218,8 @@ class DOMTool implements Tool {
       };
 
       // 获取 DOM 结构
-      const domStructure = getElementStructure(targetElement);
+      const elementCount = { value: 0 };
+      const domStructure = getElementStructure(targetElement, 0, elementCount);
       if (!domStructure) {
         throw new Error('Failed to generate DOM structure');
       }
@@ -236,7 +250,9 @@ class DOMTool implements Tool {
         pageInfo,
         domStructure,
         semanticInfo,
-        totalElements: document.querySelectorAll('*').length,
+        totalElements: elementCount.value,
+        // 添加是否达到元素限制的标记
+        truncated: elementCount.value >= maxElements,
       };
 
       return result;
@@ -359,4 +375,4 @@ class DOMTool implements Tool {
 }
 
 // 导出 DOM 工具实例
-export const domTool = new DOMTool();
+export const DOMTool = new DOMToolImpl();
