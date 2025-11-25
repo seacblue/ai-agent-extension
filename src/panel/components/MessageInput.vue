@@ -2,15 +2,27 @@
   <div class="input-area">
     <!-- 元素信息显示区域 -->
     <div v-if="selectedElement" class="attachment-content">
-      <div class="element-name">{{ MessageService.generateElementSummary(selectedElement.elementData) }}</div>
-      <div class="element-tags">
-        <span class="element-tag">{{ selectedElement.elementData.tagName }}</span>
-        <span v-if="selectedElement.elementData.id" class="element-id">#{{ selectedElement.elementData.id }}</span>
-        <span v-if="selectedElement.elementData.className" class="element-class">.{{ selectedElement.elementData.className.split(' ').join('.') }}</span>
+      <div class="element-name">
+        {{ MessageService.generateElementSummary(selectedElement.elementData) }}
       </div>
-      <button class="attachment-remove" @click="removeSelectedElement">×</button>
+      <div class="element-tags">
+        <span class="element-tag">{{
+          selectedElement.elementData.tagName
+        }}</span>
+        <span v-if="selectedElement.elementData.id" class="element-id"
+          >#{{ selectedElement.elementData.id }}</span
+        >
+        <span v-if="selectedElement.elementData.className" class="element-class"
+          >.{{
+            selectedElement.elementData.className.split(' ').join('.')
+          }}</span
+        >
+      </div>
+      <button class="attachment-remove" @click="removeSelectedElement">
+        ×
+      </button>
     </div>
-    
+
     <div class="input-wrapper">
       <textarea
         v-model="inputText"
@@ -21,9 +33,9 @@
         rows="1"
         ref="textareaRef"
       ></textarea>
-      <button 
-        @click="handleElementSelector" 
-        :disabled="isSending || isSelectingElement" 
+      <button
+        @click="handleElementSelector"
+        :disabled="isSending || isSelectingElement"
         class="selector-button"
         title="选择页面元素进行分析"
       >
@@ -31,8 +43,19 @@
           <img src="/icons/picker.png" alt="选择器" />
         </div>
       </button>
-      <button @click="handleButtonClick" :disabled="!inputText.trim() && !isSending" class="send-button" :class="{ 'terminate-button': isSending }">
-        <img :src="isSending ? '/icons/stop_thinking.png' : '/icons/send_message.png'" :alt="isSending ? '终止' : '发送'" class="send-icon" />
+      <button
+        @click="handleButtonClick"
+        :disabled="!inputText.trim() && !isSending"
+        class="send-button"
+        :class="{ 'terminate-button': isSending }"
+      >
+        <img
+          :src="
+            isSending ? '/icons/stop_thinking.png' : '/icons/send_message.png'
+          "
+          :alt="isSending ? '终止' : '发送'"
+          class="send-icon"
+        />
         <span>{{ isSending ? '终止' : '发送' }}</span>
       </button>
     </div>
@@ -40,122 +63,147 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue'
-import { MessageService } from '../../shared/services/messageService'
+import { ref, onMounted, nextTick, watch } from 'vue';
+import { MessageService } from '../../shared/services/messageService';
+
+// 定义元素数据的接口
+interface ElementData {
+  tagName: string;
+  id?: string;
+  className?: string;
+  attributes?: Record<string, string>;
+  properties?: Record<string, unknown>;
+}
 
 const props = defineProps<{
-  isSending: boolean
+  isSending: boolean;
   selectedElement?: {
-    id: string
-    elementData: any
-    timestamp: number
-  } | null
-}>()
+    id: string;
+    elementData: ElementData;
+    timestamp: number;
+  } | null;
+}>();
 
 const emit = defineEmits<{
-  'send-message': []
-  'terminate-message': []
-  'element-selector': []
-  'remove-element': []
-}>()
+  'send-message': [];
+  'terminate-message': [];
+  'element-selector': [];
+  'remove-element': [];
+}>();
 
-const inputText = ref('')
-const textareaRef = ref<HTMLTextAreaElement>()
-const isSelectingElement = ref(false)
+const inputText = ref('');
+const textareaRef = ref<HTMLTextAreaElement>();
+const isSelectingElement = ref(false);
 
 const handleButtonClick = () => {
   if (props.isSending) {
-    emit('terminate-message')
+    emit('terminate-message');
   } else {
-    emit('send-message')
+    emit('send-message');
   }
-}
+};
 
 const handleElementSelector = () => {
   if (!props.isSending && !isSelectingElement.value) {
-    isSelectingElement.value = true
-    emit('element-selector')
+    isSelectingElement.value = true;
+    emit('element-selector');
   }
-}
+};
 
 const removeSelectedElement = () => {
-  emit('remove-element')
-}
+  emit('remove-element');
+};
 
 // 处理输入事件
 const handleInput = () => {
   nextTick(() => {
-    adjustTextareaHeight()
-  })
-}
+    adjustTextareaHeight();
+  });
+};
 
 // 处理键盘事件：Enter 发送，Shift+Enter 换行
 const handleKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'Enter') {
     if (event.shiftKey) {
       // Shift+Enter 换行
-      event.preventDefault()
-      const textarea = event.target as HTMLTextAreaElement
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const value = inputText.value
-      
+      event.preventDefault();
+      const textarea = event.target as HTMLTextAreaElement;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const value = inputText.value;
+
       // 在光标位置插入换行符
-      inputText.value = value.substring(0, start) + '\n' + value.substring(end)
-      
+      inputText.value = value.substring(0, start) + '\n' + value.substring(end);
+
       // 恢复光标位置
       nextTick(() => {
-        textarea.selectionStart = textarea.selectionEnd = start + 1
-        adjustTextareaHeight()
-      })
+        textarea.selectionStart = textarea.selectionEnd = start + 1;
+        adjustTextareaHeight();
+      });
     } else {
       // Enter 发送消息
-      event.preventDefault()
+      event.preventDefault();
       if (!props.isSending && inputText.value.trim()) {
-        emit('send-message')
+        emit('send-message');
       }
     }
   }
-}
+};
 
 const adjustTextareaHeight = () => {
-  const textarea = textareaRef.value
-  if (!textarea) return
-  
-  // 简单的高度调整：重置高度，然后让自然高度决定
-  textarea.style.height = 'auto'
-  const scrollHeight = textarea.scrollHeight
-  const minHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--textarea-min-height')) || 36
-  const maxHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--textarea-max-height')) || 96
-  
-  // 应用限制后的高度
-  const targetHeight = Math.min(Math.max(scrollHeight, minHeight), maxHeight)
-  textarea.style.height = `${targetHeight}px`
-}
+  const textarea = textareaRef.value;
+  if (!textarea) return;
 
-watch(() => props.selectedElement, () => {
-  nextTick(() => {
-    adjustTextareaHeight()
-  })
-}, { immediate: true })
+  // 简单的高度调整：重置高度，然后让自然高度决定
+  textarea.style.height = 'auto';
+  const scrollHeight = textarea.scrollHeight;
+  const minHeight =
+    parseInt(
+      getComputedStyle(document.documentElement).getPropertyValue(
+        '--textarea-min-height'
+      )
+    ) || 36;
+  const maxHeight =
+    parseInt(
+      getComputedStyle(document.documentElement).getPropertyValue(
+        '--textarea-max-height'
+      )
+    ) || 96;
+
+  // 应用限制后的高度
+  const targetHeight = Math.min(Math.max(scrollHeight, minHeight), maxHeight);
+  textarea.style.height = `${targetHeight}px`;
+};
+
+watch(
+  () => props.selectedElement,
+  () => {
+    nextTick(() => {
+      adjustTextareaHeight();
+    });
+  },
+  { immediate: true }
+);
 
 // 清空输入框
 const clearInput = () => {
-  inputText.value = ''
-  adjustTextareaHeight()
-}
+  inputText.value = '';
+  adjustTextareaHeight();
+};
 
 // 获取输入框内容
-const getInputText = () => inputText.value
+const getInputText = () => inputText.value;
 
 // 重置元素选择状态
 const resetElementSelector = () => {
-  isSelectingElement.value = false
-}
+  isSelectingElement.value = false;
+};
 
 // 暴露方法给父组件
-defineExpose({ clearInput, getInputText, resetElementSelector })
-onMounted(() => { adjustTextareaHeight() })
+defineExpose({ clearInput, getInputText, resetElementSelector });
+onMounted(() => {
+  adjustTextareaHeight();
+});
 </script>
 
 <style scoped>
@@ -236,7 +284,10 @@ onMounted(() => { adjustTextareaHeight() })
   border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
-  transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease,
+    background 0.3s ease;
   box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
   display: flex;
   align-items: center;
@@ -257,12 +308,17 @@ onMounted(() => { adjustTextareaHeight() })
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
   transition: left 0.5s ease;
 }
 
-.selector-button:hover:not(:disabled)::before { 
-  left: 100%; 
+.selector-button:hover:not(:disabled)::before {
+  left: 100%;
 }
 
 .selector-button:hover:not(:disabled) {
@@ -288,7 +344,9 @@ onMounted(() => { adjustTextareaHeight() })
   cursor: not-allowed;
   box-shadow: none;
   transform: none;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
 .selector-icon {
@@ -318,7 +376,10 @@ onMounted(() => { adjustTextareaHeight() })
   border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
-  transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease,
+    background 0.3s ease;
   box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
   display: flex;
   align-items: center;
@@ -339,12 +400,17 @@ onMounted(() => { adjustTextareaHeight() })
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
   transition: left 0.5s ease;
 }
 
-.send-button:hover:not(:disabled)::before { 
-  left: 100%; 
+.send-button:hover:not(:disabled)::before {
+  left: 100%;
 }
 
 .send-button.terminate-button {
@@ -465,7 +531,9 @@ onMounted(() => { adjustTextareaHeight() })
   height: 16px;
   object-fit: contain;
   filter: brightness(0) invert(1);
-  transition: transform 0.3s ease, filter 0.3s ease;
+  transition:
+    transform 0.3s ease,
+    filter 0.3s ease;
 }
 
 .send-button:hover:not(:disabled) {
@@ -491,7 +559,9 @@ onMounted(() => { adjustTextareaHeight() })
   cursor: not-allowed;
   box-shadow: none;
   transform: none;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
 .send-button:disabled .send-icon {
@@ -505,7 +575,9 @@ onMounted(() => { adjustTextareaHeight() })
 }
 
 .send-button:not(:disabled) span {
-  transition: color 0.3s ease, text-shadow 0.3s ease;
+  transition:
+    color 0.3s ease,
+    text-shadow 0.3s ease;
 }
 
 .send-button:hover:not(:disabled) span {

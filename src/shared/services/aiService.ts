@@ -46,7 +46,7 @@ export class AIService {
    */
   private async initializeClient(apiKey?: string): Promise<boolean> {
     try {
-      const key = apiKey || await getApiKeyFromStorage();
+      const key = apiKey || (await getApiKeyFromStorage());
       if (!key || key.trim() === '') {
         throw new Error('API 密钥未配置');
       }
@@ -94,25 +94,26 @@ export class AIService {
       const messages: ChatMessage[] = [
         {
           role: 'system',
-          content: '你是一个专业的分析助手，擅长判断用户问题的分析需求。只返回 JSON 格式的结果。'
+          content:
+            '你是一个专业的分析助手，擅长判断用户问题的分析需求。只返回 JSON 格式的结果。',
         },
         {
           role: 'user',
-          content: analysisPrompt
-        }
+          content: analysisPrompt,
+        },
       ];
 
       const response = await this.aiClient.sendMessage(messages);
       console.log('AI 分析响应:', JSON.stringify(response, null, 2));
-      
+
       try {
         const content = response.choices?.[0]?.message?.content || '';
         const result = JSON.parse(content);
-        
+
         return {
           shouldAnalyzeDOM: Boolean(result.shouldAnalyzeDOM),
           shouldAnalyzeCSS: Boolean(result.shouldAnalyzeCSS),
-          targetElement: result.targetElement || undefined
+          targetElement: result.targetElement || undefined,
         };
       } catch (parseError) {
         console.error('分析响应解析失败: ', parseError);
@@ -155,7 +156,7 @@ export class AIService {
 
       // 构建提示词
       const promptParts = [
-        '你是一个专业的AI开发者助手，擅长分析网页结构和回答技术问题。'
+        '你是一个专业的AI开发者助手，擅长分析网页结构和回答技术问题。',
       ];
 
       if (domData) {
@@ -167,16 +168,22 @@ export class AIService {
       }
 
       promptParts.push(`用户问题：${question}`);
-      promptParts.push('请基于以上提供的分析数据（如果有）来回答用户的问题。如果没有相关数据，请直接回答用户的问题。');
-      
+      promptParts.push(
+        '请基于以上提供的分析数据（如果有）来回答用户的问题。如果没有相关数据，请直接回答用户的问题。'
+      );
+
       let fullPrompt = promptParts.join('\n\n');
-      
+
       // 检查提示词长度
       if (fullPrompt.length > 20000) {
-        console.log(`警告：整体提示词长度 ${fullPrompt.length} 字符，可能接近 token 限制`);
+        console.log(
+          `警告：整体提示词长度 ${fullPrompt.length} 字符，可能接近 token 限制`
+        );
         // 如果提示词太长，可以进一步精简
         if (fullPrompt.length > 30000) {
-          fullPrompt = fullPrompt.substring(0, 30000) + '...\n[提示词已被截断以避免token超限]';
+          fullPrompt =
+            fullPrompt.substring(0, 30000) +
+            '...\n[提示词已被截断以避免token超限]';
         }
       }
 
@@ -187,12 +194,13 @@ export class AIService {
         [
           {
             role: 'system',
-            content: '你是一个专业的网页分析和开发助手，专门帮助用户完成网页相关的任务。你需要分析页面结构、CSS样式、DOM元素等，并提供解决方案。请始终使用中文回答用户的问题。无论用户使用什么语言提问，都要用中文回复。'
+            content:
+              '你是一个专业的网页分析和开发助手，专门帮助用户完成网页相关的任务。你需要分析页面结构、CSS样式、DOM元素等，并提供解决方案。请始终使用中文回答用户的问题。无论用户使用什么语言提问，都要用中文回复。',
           },
           {
             role: 'user',
-            content: fullPrompt
-          }
+            content: fullPrompt,
+          },
         ],
         // onChunk - 处理每个数据块
         (chunk: string) => {
@@ -236,10 +244,15 @@ export class AIService {
    */
   public truncateData(data: any, maxLength: number = 10000): string {
     try {
-      let jsonString = JSON.stringify(data, null, 2);
+      const jsonString = JSON.stringify(data, null, 2);
       if (jsonString.length > maxLength) {
-        console.log(`数据被截断，原始长度: ${jsonString.length}，截断后长度: ${maxLength}`);
-        return jsonString.substring(0, maxLength - 100) + '... [数据被截断以避免token超限]';
+        console.log(
+          `数据被截断，原始长度: ${jsonString.length}，截断后长度: ${maxLength}`
+        );
+        return (
+          jsonString.substring(0, maxLength - 100) +
+          '... [数据被截断以避免token超限]'
+        );
       }
       return jsonString;
     } catch (e) {

@@ -5,41 +5,44 @@
 </template>
 
 <script setup lang="ts">
-import { ref, defineExpose } from 'vue'
+import { ref, defineExpose } from 'vue';
 
 // 弹出消息状态
-const showPopup = ref(false)
-const popupMessage = ref('')
-const popupType = ref<'success' | 'error'>('success')
+const showPopup = ref(false);
+const popupMessage = ref('');
+const popupType = ref<'success' | 'error'>('success');
 
 // 显示弹出提示
-const showPopupMessage = (message: string, type: 'success' | 'error' = 'success') => {
-  popupMessage.value = message
-  popupType.value = type
-  showPopup.value = true
-  
+const showPopupMessage = (
+  message: string,
+  type: 'success' | 'error' = 'success'
+) => {
+  popupMessage.value = message;
+  popupType.value = type;
+  showPopup.value = true;
+
   setTimeout(() => {
-    const popupElement = document.querySelector('.popup') as HTMLElement
+    const popupElement = document.querySelector('.popup') as HTMLElement;
     if (popupElement) {
-      popupElement.classList.add('hiding')
-      
+      popupElement.classList.add('hiding');
+
       setTimeout(() => {
-        showPopup.value = false
-        popupMessage.value = ''
-        popupType.value = 'success'
-      }, 400)
+        showPopup.value = false;
+        popupMessage.value = '';
+        popupType.value = 'success';
+      }, 400);
     } else {
-      showPopup.value = false
-      popupMessage.value = ''
-      popupType.value = 'success'
+      showPopup.value = false;
+      popupMessage.value = '';
+      popupType.value = 'success';
     }
-  }, 2500)
-}
+  }, 2500);
+};
 
 // 暴露方法供父组件调用
 defineExpose({
-  showPopupMessage
-})
+  showPopupMessage,
+});
 </script>
 
 <style scoped>

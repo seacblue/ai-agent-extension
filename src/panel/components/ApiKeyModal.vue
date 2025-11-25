@@ -1,44 +1,76 @@
 <template>
   <transition name="modal" appear>
-    <div v-if="visible" class="settings-modal" 
+    <div
+      v-if="visible"
+      class="settings-modal"
       @mousedown="onModalMouseDown"
-      @mouseup="onModalMouseUp">
+      @mouseup="onModalMouseUp"
+    >
       <transition name="modal-content" appear>
         <div class="settings-content" @mousedown.stop @click.stop>
           <div class="settings-header">
             <h3>API 密钥设置</h3>
-            <button class="close-button" @mousedown="onCloseButtonClick">×</button>
+            <button class="close-button" @mousedown="onCloseButtonClick">
+              ×
+            </button>
           </div>
           <div class="settings-body">
             <div class="api-key-section">
               <label for="apiKey">豆包 AI API KEY：</label>
               <div class="input-group">
-                <input 
+                <input
                   id="apiKey"
-                  v-model="apiKeyInput" 
-                  type="password" 
+                  v-model="apiKeyInput"
+                  type="password"
                   placeholder="请输入您的豆包 AI API KEY"
                   class="api-key-input"
                   :class="{ 'has-value': apiKeyInput.length > 0 }"
                 />
-                <button class="toggle-visibility" @click="toggleApiKeyVisibility" :title="showApiKey ? '隐藏密钥' : '显示密钥'">
-                  <img 
-                    :src="showApiKey ? '/icons/eye_visible.png' : '/icons/eye_invisible.png'" 
-                    alt="切换显示" 
-                    class="toggle-icon" 
+                <button
+                  class="toggle-visibility"
+                  @click="toggleApiKeyVisibility"
+                  :title="showApiKey ? '隐藏密钥' : '显示密钥'"
+                >
+                  <img
+                    :src="
+                      showApiKey
+                        ? '/icons/eye_visible.png'
+                        : '/icons/eye_invisible.png'
+                    "
+                    alt="切换显示"
+                    class="toggle-icon"
                   />
                 </button>
               </div>
+              <!-- API Key Status Indicator -->
+              <div
+                class="api-key-status"
+                :class="{
+                  configured: isApiKeyConfigured,
+                  'not-configured': !isApiKeyConfigured,
+                }"
+              >
+                <span class="status-icon">{{
+                  isApiKeyConfigured ? '✓' : '!'
+                }}</span>
+                <span class="status-text">{{
+                  isApiKeyConfigured ? '已经配置 API KEY' : '仍未配置 API KEY'
+                }}</span>
+              </div>
             </div>
             <div class="settings-actions">
-              <button class="save-button"
-                :disabled="!apiKeyInput.trim()" 
-                @click="saveApiKey">
+              <button
+                class="save-button"
+                :disabled="!apiKeyInput.trim()"
+                @click="saveApiKey"
+              >
                 保存密钥
               </button>
-              <button class="clear-button" 
+              <button
+                class="clear-button"
                 :disabled="!isApiKeyConfigured"
-                @click="clearApiKey">
+                @click="clearApiKey"
+              >
                 清空 API KEY
               </button>
             </div>
@@ -50,140 +82,165 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch } from 'vue';
 
 // Props
 interface Props {
-  visible: boolean
-  isApiKeyConfigured: boolean
+  visible: boolean;
+  isApiKeyConfigured: boolean;
 }
 
-const props = defineProps<Props>()
+const props = defineProps<Props>();
 
 // Emits
 const emit = defineEmits<{
-  close: []
-  saveApiKey: [apiKey: string]
-  clearApiKey: []
-}>()
+  close: [];
+  saveApiKey: [apiKey: string];
+  clearApiKey: [];
+}>();
 
 // Local state
-const apiKeyInput = ref('')
-const showApiKey = ref(false)
-const mouseDownTarget = ref<EventTarget | null>(null)
+const apiKeyInput = ref('');
+const showApiKey = ref(false);
+const mouseDownTarget = ref<EventTarget | null>(null);
 
 // Watch for modal visibility changes
-watch(() => props.visible, (newVal) => {
-  if (newVal) {
-    loadApiKey()
+watch(
+  () => props.visible,
+  newVal => {
+    if (newVal) {
+      loadApiKey();
+    }
   }
-})
+);
 
 // Load existing API key
 const loadApiKey = async () => {
   try {
-    const response = await chrome.runtime.sendMessage({
-      type: 'GET_API_KEY'
-    })
-    
-    if (response.type === 'success' && response.apiKey) {
-      apiKeyInput.value = response.apiKey
-    }
+    // Reset input field when modal opens
+    apiKeyInput.value = '';
+
+    // We don't need to load the actual API key for security reasons
+    // The isApiKeyConfigured prop already tells us if a key is configured
+    console.log('API key status: configured =', props.isApiKeyConfigured);
   } catch (error) {
-    console.error('加载 API 密钥失败: ', error)
+    console.error('检查 API 密钥状态失败: ', error);
   }
-}
+};
 
 // Toggle API key visibility
 const toggleApiKeyVisibility = () => {
-  const input = document.getElementById('apiKey') as HTMLInputElement
+  const input = document.getElementById('apiKey') as HTMLInputElement;
   if (input) {
-    showApiKey.value = !showApiKey.value
-    input.type = showApiKey.value ? 'text' : 'password'
+    showApiKey.value = !showApiKey.value;
+    input.type = showApiKey.value ? 'text' : 'password';
   }
-}
+};
 
 // Save API key
 const saveApiKey = async () => {
-  if (!apiKeyInput.value.trim()) return
-  
+  if (!apiKeyInput.value.trim()) return;
+
   try {
     const response = await chrome.runtime.sendMessage({
       type: 'SET_API_KEY',
-      apiKey: apiKeyInput.value.trim()
-    })
-    
+      apiKey: apiKeyInput.value.trim(),
+    });
+
     if (response.type === 'success') {
-      emit('saveApiKey', apiKeyInput.value.trim())
+      emit('saveApiKey', apiKeyInput.value.trim());
     } else {
-      console.error('保存 API 密钥失败: ', response.error)
+      console.error('保存 API 密钥失败: ', response.error);
     }
   } catch (error) {
-    console.error('保存 API 密钥失败: ', error)
+    console.error('保存 API 密钥失败: ', error);
   }
-}
+};
 
 // Clear API key
 const clearApiKey = async () => {
   try {
     const response = await chrome.runtime.sendMessage({
-      type: 'CLEAR_API_KEY'
-    })
-    
+      type: 'CLEAR_API_KEY',
+    });
+
     if (response.type === 'success') {
-      apiKeyInput.value = ''
-      emit('clearApiKey')
+      apiKeyInput.value = '';
+      emit('clearApiKey');
     } else {
-      console.error('清空 API 密钥失败: ', response.error)
+      console.error('清空 API 密钥失败: ', response.error);
     }
   } catch (error) {
-    console.error('清空 API 密钥失败: ', error)
+    console.error('清空 API 密钥失败: ', error);
   }
-}
+};
 
 // Modal interaction handlers
 const onModalMouseDown = (event: MouseEvent) => {
-  mouseDownTarget.value = event.target
-}
+  mouseDownTarget.value = event.target;
+};
 
 const onModalMouseUp = (event: MouseEvent) => {
   if (mouseDownTarget.value === event.currentTarget) {
-    closeModal()
+    closeModal();
   }
-  mouseDownTarget.value = null
-}
+  mouseDownTarget.value = null;
+};
 
 const onCloseButtonClick = (event: MouseEvent) => {
-  event.stopPropagation() // 防止事件冒泡到背景
-  closeModal()
-}
+  event.stopPropagation(); // 防止事件冒泡到背景
+  closeModal();
+};
 
 const closeModal = () => {
   // 触发关闭事件，让Vue transition处理动画
-  emit('close')
-}
+  emit('close');
+};
 
 // 监听visible变化，在模态框完全隐藏后重置状态
-watch(() => props.visible, (newVal) => {
-  if (!newVal) {
-    // 模态框关闭后重置相关状态
-    showApiKey.value = false
+watch(
+  () => props.visible,
+  newVal => {
+    if (!newVal) {
+      // 模态框关闭后重置相关状态
+      showApiKey.value = false;
+    }
   }
-})
+);
 </script>
 
 <style scoped>
 /* 模态框背景动画 */
-.modal-enter-active { transition: all 0.3s ease; }
-.modal-leave-active { transition: all 0.3s ease; }
-.modal-enter-from { background-color: rgba(0, 0, 0, 0); opacity: 0; }
-.modal-leave-to { background-color: rgba(0, 0, 0, 0); opacity: 0; }
+.modal-enter-active {
+  transition: all 0.3s ease;
+}
+.modal-leave-active {
+  transition: all 0.3s ease;
+}
+.modal-enter-from {
+  background-color: rgba(0, 0, 0, 0);
+  opacity: 0;
+}
+.modal-leave-to {
+  background-color: rgba(0, 0, 0, 0);
+  opacity: 0;
+}
 
 /* 模态框内容动画 */
-.modal-content-enter-active { transition: all 0.3s ease; }
-.modal-content-leave-active { transition: all 0.3s ease; }
-.modal-content-enter-from { transform: scale(0.7); opacity: 0; }
-.modal-content-leave-to { transform: scale(0.7); opacity: 0; }
+.modal-content-enter-active {
+  transition: all 0.3s ease;
+}
+.modal-content-leave-active {
+  transition: all 0.3s ease;
+}
+.modal-content-enter-from {
+  transform: scale(0.7);
+  opacity: 0;
+}
+.modal-content-leave-to {
+  transform: scale(0.7);
+  opacity: 0;
+}
 
 .settings-modal {
   position: fixed;
@@ -269,7 +326,7 @@ watch(() => props.visible, (newVal) => {
   flex: 1;
   padding: 12px 45px 12px 16px;
   border: 2px solid #e9ecef;
-  border-radius: 25px;
+  border-radius: 6px;
   font-size: 14px;
   transition: all 0.3s ease;
   background: #f8f9fa;
@@ -291,6 +348,38 @@ watch(() => props.visible, (newVal) => {
 .api-key-input.has-value {
   background-color: white;
   border-color: #d0d0d0;
+}
+
+/* API Key Status Indicator */
+.api-key-status {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.api-key-status.configured {
+  background-color: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.api-key-status.not-configured {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.status-icon {
+  margin-right: 6px;
+  font-weight: bold;
+}
+
+.status-text {
+  flex: 1;
 }
 
 .toggle-visibility {
@@ -327,7 +416,8 @@ watch(() => props.visible, (newVal) => {
   gap: 12px;
 }
 
-.save-button, .clear-button {
+.save-button,
+.clear-button {
   flex: 1;
   padding: 12px 24px;
   border: none;
@@ -359,17 +449,26 @@ watch(() => props.visible, (newVal) => {
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.1), transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(0, 0, 0, 0.1),
+    transparent
+  );
   transition: left 0.5s ease;
 }
-.save-button:hover:not(:disabled)::before { left: 100%; }
+.save-button:hover:not(:disabled)::before {
+  left: 100%;
+}
 .save-button:hover:not(:disabled) {
   background-color: #004085;
   color: white;
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 123, 255, 0.4);
 }
-.save-button:active:not(:disabled) { transform: translateY(0);}
+.save-button:active:not(:disabled) {
+  transform: translateY(0);
+}
 
 .clear-button {
   background-color: #f8f9fa;
@@ -390,15 +489,24 @@ watch(() => props.visible, (newVal) => {
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.1), transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(0, 0, 0, 0.1),
+    transparent
+  );
   transition: left 0.5s ease;
 }
-.clear-button:hover:not(:disabled)::before { left: 100%; }
+.clear-button:hover:not(:disabled)::before {
+  left: 100%;
+}
 .clear-button:hover:not(:disabled) {
   background-color: #c82333;
   color: white;
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
 }
-.clear-button:active:not(:disabled) { transform: translateY(0);}
+.clear-button:active:not(:disabled) {
+  transform: translateY(0);
+}
 </style>

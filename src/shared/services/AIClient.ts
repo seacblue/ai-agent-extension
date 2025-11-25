@@ -3,13 +3,15 @@ import { API_CONFIG } from './api';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
-  content: string | Array<{
-    type: 'text' | 'image_url';
-    text?: string;
-    image_url?: {
-      url: string;
-    };
-  }>;
+  content:
+    | string
+    | Array<{
+        type: 'text' | 'image_url';
+        text?: string;
+        image_url?: {
+          url: string;
+        };
+      }>;
 }
 
 export interface ChatCompletionRequest {
@@ -51,6 +53,11 @@ export class DoubaoAIClient {
     this.model = API_CONFIG.VOLCES.MODEL;
   }
 
+  // 获取用于 API 调用的认证信息
+  private getAuthToken(): string {
+    return this.apiKey;
+  }
+
   // 发送聊天请求
   async sendMessage(messages: ChatMessage[]): Promise<ChatCompletionResponse> {
     const request: ChatCompletionRequest = {
@@ -61,18 +68,21 @@ export class DoubaoAIClient {
     };
 
     try {
+      const token = this.getAuthToken();
       const response = await fetch(this.baseUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(request),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`API 请求失败: ${response.status} ${response.statusText} - ${errorText}`);
+        throw new Error(
+          `API 请求失败: ${response.status} ${response.statusText} - ${errorText}`
+        );
       }
 
       const data: ChatCompletionResponse = await response.json();
@@ -100,11 +110,12 @@ export class DoubaoAIClient {
     };
 
     try {
+      const token = this.getAuthToken();
       const response = await fetch(this.baseUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(request),
         signal: abortSignal,
@@ -112,7 +123,9 @@ export class DoubaoAIClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`API 请求失败: ${response.status} ${response.statusText} - ${errorText}`);
+        throw new Error(
+          `API 请求失败: ${response.status} ${response.statusText} - ${errorText}`
+        );
       }
 
       const reader = response.body?.getReader();

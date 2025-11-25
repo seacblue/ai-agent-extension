@@ -1,51 +1,43 @@
 {
-    "manifest_version": 3,
-    "name": "Web 前端智能开发者助手",
-    "version": "1.0.0",
-    "description": "AI 助手，帮助开发者分析页面结构、CSS 样式和网络请求",
-    
-    "icons": {
-        "16": "icons/icon16.png",
-        "48": "icons/icon48.png",
-        "128": "icons/icon128.png"
-    },
+  "manifest_version": 3,
+  "name": "Web 前端智能开发者助手",
+  "version": "1.0.0",
+  "description": "AI 助手，帮助开发者分析页面结构、CSS 样式和网络请求",
 
-    "permissions": [
-        "activeTab",
-        "storage",
-        "scripting",
-        "tabs"
-    ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
 
-    "host_permissions": [
-        "<all_urls>",
-        "https://ark.cn-beijing.volces.com/*"
-    ],
+  "permissions": ["activeTab", "storage", "scripting", "tabs"],
 
-    "devtools_page": "devtools.html",
+  "host_permissions": ["<all_urls>", "https://ark.cn-beijing.volces.com/*"],
 
-    "background": {
-        "service_worker": "background.js",
-        "type": "module"
-    },
+  "devtools_page": "devtools.html",
 
-    "content_scripts": [
-        {
-            "matches": ["<all_urls>"],
-            "js": ["content.js"],
-            "run_at": "document_end",
-            "all_frames": false
-        }
-    ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
 
-    "content_security_policy": {
-        "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://ark.cn-beijing.volces.com/ https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-    },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ],
 
-    "web_accessible_resources": [
-        {
-            "resources": ["assets/*"],
-            "matches": ["<all_urls>"]
-        }
-    ]
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://ark.cn-beijing.volces.com/ https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

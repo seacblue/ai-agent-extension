@@ -1,3 +1,5 @@
+import { CryptoService } from './cryptoService';
+
 // API 配置管理
 export const API_CONFIG = {
   // 豆包 AI API 配置
@@ -13,22 +15,43 @@ export const API_CONFIG = {
       }
       // 从 Chrome 存储中获取
       return await getApiKeyFromStorage();
-    }
-  }
+    },
+    // 获取用于 API 调用的短期令牌
+    getAuthToken: async () => {
+      const apiKey = await API_CONFIG.VOLCES.getApiKey();
+      if (!apiKey) return '';
+
+      const cryptoService = CryptoService.getInstance();
+      return await cryptoService.generateShortLivedToken(apiKey);
+    },
+  },
 };
 
-// 从 Chrome 存储中获取 API 密钥
+// 加密服务实例
+const cryptoService = CryptoService.getInstance();
+
+// 从 Chrome 存储中获取加密的 API 密钥并解密
 export async function getApiKeyFromStorage(): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.get(['volcesApiKey'], (result) => {
-        const apiKey = result.volcesApiKey as string | undefined;
-        
-        // 如果未设置，返回空字符串；如果设置了，直接返回值（包括空字符串）
-        if (apiKey === undefined) {
+      chrome.storage.local.get(['encryptedVolcesApiKey'], async result => {
+        const encryptedApiKey = result.encryptedVolcesApiKey as
+          | string
+          | undefined;
+
+        // 如果未设置，返回空字符串
+        if (encryptedApiKey === undefined) {
           resolve('');
-        } else {
-          resolve(apiKey);
+          return;
+        }
+
+        try {
+          // 解密API密钥
+          const decryptedKey = await cryptoService.decrypt(encryptedApiKey);
+          resolve(decryptedKey);
+        } catch (error) {
+          console.error('解密API密钥失败:', error);
+          resolve('');
         }
       });
     } else {
@@ -37,8 +60,11 @@ export async function getApiKeyFromStorage(): Promise<string> {
   });
 }
 
-// 保存 API 密钥到 Chrome 存储
-export async function saveApiKey(apiKey: string, allowEmpty: boolean = false): Promise<void> {
+// 加密并保存 API 密钥到 Chrome 存储
+export async function saveApiKey(
+  apiKey: string,
+  allowEmpty: boolean = false
+): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof chrome !== 'undefined' && chrome.storage) {
       // 验证 API 密钥格式（除非允许空值）
@@ -46,16 +72,40 @@ export async function saveApiKey(apiKey: string, allowEmpty: boolean = false): P
         reject(new Error('API 密钥不能为空'));
         return;
       }
-      
+
       const trimmedApiKey = apiKey.trim();
-      
-      chrome.storage.local.set({ volcesApiKey: trimmedApiKey }, () => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve();
-        }
-      });
+
+      // 如果是空字符串（清空操作），直接存储
+      if (trimmedApiKey === '') {
+        chrome.storage.local.set({ encryptedVolcesApiKey: '' }, () => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve();
+          }
+        });
+        return;
+      }
+
+      // 加密 API 密钥后存储
+      cryptoService
+        .encrypt(trimmedApiKey)
+        .then(encryptedKey => {
+          chrome.storage.local.set(
+            { encryptedVolcesApiKey: encryptedKey },
+            () => {
+              if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+              } else {
+                resolve();
+              }
+            }
+          );
+        })
+        .catch(error => {
+          console.error('加密 API 密钥失败:', error);
+          reject(new Error('加密 API 密钥失败: ' + (error as Error).message));
+        });
     } else {
       reject(new Error('Chrome 存储不可用'));
     }
@@ -68,66 +118,73 @@ export async function isApiKeyConfigured(): Promise<boolean> {
 }
 
 // 处理设置 API 密钥
-export async function handleSetApiKey(apiKey: string, sendResponse: (response: any) => void): Promise<void> {
+export async function handleSetApiKey(
+  apiKey: string,
+  sendResponse: (response: any) => void
+): Promise<void> {
   try {
     if (!apiKey || apiKey.trim().length === 0) {
       throw new Error('API 密钥不能为空');
     }
-    
-    await saveApiKey(apiKey.trim())
+
+    await saveApiKey(apiKey.trim());
     sendResponse({
       type: 'success',
       message: 'API 密钥保存成功',
-      status: 'success'
-    })
+      status: 'success',
+    });
   } catch (error) {
-    console.error('保存 API 密钥失败: ', error)
+    console.error('保存 API 密钥失败: ', error);
     sendResponse({
       type: 'error',
       error: '保存 API 密钥失败: ' + (error as Error).message,
-      status: 'error'
-    })
+      status: 'error',
+    });
   }
 }
 
-// 处理获取 API 密钥
-export async function handleGetApiKey(sendResponse: (response: any) => void): Promise<void> {
+// 处理获取 API 密钥状态
+export async function handleGetApiKey(
+  sendResponse: (response: any) => void
+): Promise<void> {
   try {
-    const apiKey = await getApiKeyFromStorage()
-    const hasKey = apiKey && apiKey.trim().length > 0
+    const apiKey = await getApiKeyFromStorage();
+    const hasKey = apiKey && apiKey.trim().length > 0;
     sendResponse({
       type: 'success',
       configured: hasKey,
-      apiKey: hasKey ? apiKey : null,
-      status: 'success'
-    })
+      apiKey: null,
+      status: 'success',
+    });
   } catch (error) {
-    console.error('获取 API 密钥状态失败: ', error)
+    console.error('获取 API 密钥状态失败: ', error);
     sendResponse({
       type: 'error',
       error: '获取 API 密钥状态失败: ' + (error as Error).message,
       status: 'error',
       configured: false,
-      apiKey: null
-    })
+      apiKey: null,
+    });
   }
 }
 
 // 处理清空 API 密钥
-export async function handleClearApiKey(sendResponse: (response: any) => void): Promise<void> {
+export async function handleClearApiKey(
+  sendResponse: (response: any) => void
+): Promise<void> {
   try {
-    await saveApiKey('', true) // 允许空值来清空 API 密钥
+    await saveApiKey('', true); // 允许空值来清空 API 密钥
     sendResponse({
       type: 'success',
       message: 'API 密钥已清空',
-      status: 'success'
-    })
+      status: 'success',
+    });
   } catch (error) {
-    console.error('清空 API 密钥失败: ', error)
+    console.error('清空 API 密钥失败: ', error);
     sendResponse({
       type: 'error',
       error: '清空 API 密钥失败: ' + (error as Error).message,
-      status: 'error'
-    })
+      status: 'error',
+    });
   }
 }

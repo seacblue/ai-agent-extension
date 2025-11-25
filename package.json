@@ -8,10 +8,12 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npx prettier --write src/ && vite build",
     "preview": "vite preview",
-    "build:extension": "vite build && shx cp manifest.json dist/ && shx cp -r public/icons/ dist/",
-    "type-check": "vue-tsc --noEmit"
+    "build:extension": "npx prettier --write src/ && vite build && shx cp manifest.json dist/",
+    "type-check": "vue-tsc --noEmit",
+    "format": "npx prettier --write src/",
+    "format:check": "npx prettier --check src/"
   },
   "dependencies": {
     "@pinia/nuxt": "^0.11.3",
@@ -32,8 +34,11 @@
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/tsconfig": "^0.8.1",
     "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-vue": "^10.5.1",
     "globals": "^16.5.0",
+    "prettier": "^3.6.2",
     "shx": "^0.4.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
