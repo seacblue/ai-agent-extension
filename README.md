@@ -10,8 +10,7 @@ AI-Agent-Extension 是一款基于 Chrome 浏览器的智能开发者助手，�
 ### 基本信息
 - **项目类型**：Chrome 浏览器扩展
 - **技术栈**：Vue 3 + TypeScript + Vite
-- **AI 集成**：豆包 AI API
-- **授权协议**：ISC
+- **AI 集成**：豆包 AI API（火山方舟）
 
 ## 主要功能列表
 
