@@ -1,6 +1,7 @@
 // AI 服务封装
 import { DoubaoAIClient, ChatMessage } from './aiClient';
 import { getApiKeyFromStorage } from './api';
+import { PromptUtils } from './prompt';
 
 /**
  * 分析决策接口
@@ -22,11 +23,35 @@ export interface AIServiceOptions {
 }
 
 /**
- * AI 服务类，封装所有 AI 相关功能
+ * 问题处理选项接口
+ */
+export interface QuestionOptions {
+  question: string;
+  requestId: string;
+  sender: chrome.runtime.MessageSender;
+  sendResponse: (response: any) => void;
+  panelPort?: chrome.runtime.Port | null;
+  getApiKeyFromStorage?: () => Promise<string>;
+  LongConnectionManager?: any;
+}
+
+/**
+ * 终止任务选项接口
+ */
+export interface TerminateOptions {
+  responseMethod: 'sendResponse' | 'portMessage';
+  sendResponse?: (response: any) => void;
+  port?: chrome.runtime.Port;
+  requestId?: string;
+}
+
+/**
+ * AI 服务类，封装所有 AI 相关功能，包括进程管理和任务协调
  */
 export class AIService {
   private aiClient: DoubaoAIClient | null = null;
   private abortController: AbortController | null = null;
+  private currentAIProcess: { abort: () => void } | null = null;
   private static instance: AIService;
 
   /**
@@ -154,38 +179,12 @@ export class AIService {
       // 创建 AbortController
       this.abortController = new AbortController();
 
-      // 构建提示词
-      const promptParts = [
-        '你是一个专业的AI开发者助手，擅长分析网页结构和回答技术问题。',
-      ];
-
-      if (domData) {
-        promptParts.push(`DOM分析数据：\n${domData}`);
-      }
-
-      if (cssData) {
-        promptParts.push(`CSS分析数据：\n${cssData}`);
-      }
-
-      promptParts.push(`用户问题：${question}`);
-      promptParts.push(
-        '请基于以上提供的分析数据（如果有）来回答用户的问题。如果没有相关数据，请直接回答用户的问题。'
-      );
-
-      let fullPrompt = promptParts.join('\n\n');
-
-      // 检查提示词长度
-      if (fullPrompt.length > 20000) {
-        console.log(
-          `警告：整体提示词长度 ${fullPrompt.length} 字符，可能接近 token 限制`
-        );
-        // 如果提示词太长，可以进一步精简
-        if (fullPrompt.length > 30000) {
-          fullPrompt =
-            fullPrompt.substring(0, 30000) +
-            '...\n[提示词已被截断以避免token超限]';
-        }
-      }
+      // 使用 PromptUtils 构建提示词
+      const fullPrompt = PromptUtils.buildPrompt({
+        question,
+        domData,
+        cssData,
+      });
 
       let isFirstChunk = true;
 
@@ -212,6 +211,7 @@ export class AIService {
         // onComplete - 流式完成
         () => {
           this.abortController = null;
+          this.currentAIProcess = null;
           if (options.onComplete) {
             options.onComplete();
           }
@@ -219,6 +219,7 @@ export class AIService {
         // onError - 错误处理
         (error: Error) => {
           this.abortController = null;
+          this.currentAIProcess = null;
           console.error('流式 API 调用失败: ', error);
           if (options.onError) {
             options.onError(error);
@@ -229,6 +230,7 @@ export class AIService {
       );
     } catch (error) {
       this.abortController = null;
+      this.currentAIProcess = null;
       console.error('AI 调用过程中出错: ', error);
       if (options.onError) {
         options.onError(error as Error);
@@ -237,27 +239,317 @@ export class AIService {
   }
 
   /**
-   * 截断数据以避免 token 超限
-   * @param data - 要截断的数据
-   * @param maxLength - 最大长度
-   * @returns 截断后的数据
+   * 处理用户问题
+   * @param options - 问题处理选项
    */
-  public truncateData(data: any, maxLength: number = 10000): string {
+  public async handleQuestion(options: QuestionOptions): Promise<void> {
+    let currentPanelPort: chrome.runtime.Port | null = null;
+    const {
+      question,
+      requestId,
+      sender,
+      sendResponse,
+      panelPort: incomingPanelPort,
+      getApiKeyFromStorage,
+      LongConnectionManager,
+    } = options;
+
     try {
-      const jsonString = JSON.stringify(data, null, 2);
-      if (jsonString.length > maxLength) {
-        console.log(
-          `数据被截断，原始长度: ${jsonString.length}，截断后长度: ${maxLength}`
-        );
-        return (
-          jsonString.substring(0, maxLength - 100) +
-          '... [数据被截断以避免token超限]'
-        );
+      // 检查是否已经有 Panel 连接
+      if (incomingPanelPort) {
+        currentPanelPort = incomingPanelPort;
+        console.log('使用传入的 Panel 连接');
+
+        // 发送连接确认
+        try {
+          // 在发送消息前检查 port 是否有效
+          if (currentPanelPort && currentPanelPort.sender) {
+            currentPanelPort.postMessage({
+              type: 'CONNECTION_ACK',
+              timestamp: new Date().toISOString(),
+            });
+            console.log('发送连接确认成功');
+          } else {
+            console.warn('连接已断开或无效，无法发送确认');
+            currentPanelPort = null;
+          }
+        } catch (error) {
+          console.error('发送连接确认失败: ', error);
+          currentPanelPort = null;
+        }
       }
-      return jsonString;
-    } catch (e) {
-      console.error('数据序列化失败:', e);
-      return '[数据序列化失败]';
+
+      const analysisDecision = await this.analyzeQuestionRequirements(question);
+      let tabId = (sender as any).tabId || sender.tab?.id;
+      if (!tabId) {
+        const tabs = await chrome.tabs.query({});
+        const activeTab = tabs.find(tab => tab.active) || tabs[0];
+        tabId = activeTab?.id;
+      }
+      if (!tabId) {
+        if (currentPanelPort) {
+          try {
+            currentPanelPort.postMessage({
+              type: 'ERROR',
+              error: '无法获取当前标签页信息，请确保在网页上打开 DevTools',
+              requestId: requestId,
+            });
+          } catch (error) {
+            console.error('发送标签页错误失败: ', error);
+          }
+        }
+        return;
+      }
+
+      let domData: string | undefined;
+      let cssData: string | undefined;
+
+      // DOM 分析
+      if (
+        analysisDecision.shouldAnalyzeDOM &&
+        LongConnectionManager &&
+        currentPanelPort
+      ) {
+        try {
+          if (currentPanelPort) {
+            currentPanelPort.postMessage({
+              type: 'THINKING',
+              content: '正在使用 DOM 分析工具...',
+              requestId: requestId,
+            });
+          }
+
+          const connectionManager = LongConnectionManager.getInstance();
+          const domResult = await connectionManager.sendLongConnectionRequest(
+            tabId!,
+            'EXECUTE_TOOLS',
+            {
+              keywords: ['getDOM'],
+              params: {
+                domOptions: {
+                  includeStyles: false,
+                  includeAttributes: true,
+                  maxDepth: 5,
+                },
+                htmlOptions: {
+                  format: true,
+                  includeDoctype: false,
+                },
+              },
+              context: {
+                tabId,
+                question,
+                timestamp: new Date().toISOString(),
+              },
+            },
+            'dom-analysis-result',
+            15000
+          );
+
+          if (
+            domResult.success &&
+            domResult.results &&
+            domResult.results.length > 0
+          ) {
+            domData = PromptUtils.truncateData(domResult.results[0].data, 8000);
+          } else {
+            console.warn('DOM 分析未返回有效结果');
+          }
+        } catch (error) {
+          console.error('DOM 分析失败: ', error);
+        }
+      }
+
+      // CSS 分析
+      if (
+        analysisDecision.shouldAnalyzeCSS &&
+        LongConnectionManager &&
+        currentPanelPort
+      ) {
+        try {
+          if (currentPanelPort) {
+            currentPanelPort.postMessage({
+              type: 'THINKING',
+              content: '正在使用 CSS 分析工具...',
+              requestId: requestId,
+            });
+          }
+
+          const connectionManager = LongConnectionManager.getInstance();
+          const cssResult = await connectionManager.sendLongConnectionRequest(
+            tabId!,
+            'EXECUTE_TOOLS',
+            {
+              keywords: ['cssAnalyzer'],
+              params: {
+                naturalQuery: question,
+                targetElement: analysisDecision.targetElement,
+                includeAll: false,
+              },
+              context: {
+                tabId,
+                question,
+                timestamp: new Date().toISOString(),
+              },
+            },
+            'css-analysis-result',
+            15000
+          );
+
+          if (
+            cssResult.success &&
+            cssResult.results &&
+            cssResult.results.length > 0
+          ) {
+            cssData = PromptUtils.truncateData(cssResult.results[0].data, 5000);
+          } else {
+            console.warn('CSS 分析未返回有效结果');
+          }
+        } catch (error) {
+          console.error('CSS 分析失败: ', error);
+        }
+      }
+
+      // 检查API密钥
+      if (!getApiKeyFromStorage) {
+        throw new Error('getApiKeyFromStorage 未提供');
+      }
+
+      const apiKey = await getApiKeyFromStorage();
+      if (!apiKey || apiKey.trim() === '') {
+        if (currentPanelPort) {
+          try {
+            currentPanelPort.postMessage({
+              type: 'ERROR',
+              error: 'API 密钥未配置，请在设置中配置豆包 AI API 密钥',
+              requestId: requestId,
+            });
+          } catch (error) {
+            console.error('发送 API 密钥错误失败: ', error);
+          }
+        }
+        return;
+      }
+
+      // 设置当前AI进程（用于中断）
+      this.currentAIProcess = {
+        abort: () => this.terminate(),
+      };
+
+      await this.sendMessageWithStream(question, domData, cssData, {
+        // 处理每个数据块
+        onChunk: (chunk: string, isFirst: boolean) => {
+          if (currentPanelPort) {
+            try {
+              currentPanelPort.postMessage({
+                type: 'STREAMING_CONTENT',
+                content: chunk,
+                isFirstChunk: isFirst,
+                requestId: requestId,
+              });
+            } catch (error) {
+              console.error('发送流式内容失败: ', error);
+              currentPanelPort = null;
+            }
+          }
+        },
+        // 完成回调
+        onComplete: () => {
+          if (currentPanelPort) {
+            try {
+              currentPanelPort.postMessage({
+                type: 'STREAMING_COMPLETE',
+                requestId: requestId,
+              });
+
+              // 触发生成反馈选项
+              this.generateFeedbackOptions(
+                question,
+                currentPanelPort,
+                requestId
+              );
+            } catch (error) {
+              console.error('发送完成消息失败: ', error);
+            }
+          }
+        },
+        // 错误处理
+        onError: (error: Error) => {
+          if (currentPanelPort) {
+            try {
+              currentPanelPort.postMessage({
+                type: 'ERROR',
+                error: 'AI 生成失败: ' + error.message,
+                requestId: requestId,
+              });
+            } catch (sendError) {
+              console.error('发送错误消息失败: ', sendError);
+            }
+            currentPanelPort = null;
+          }
+        },
+      });
+    } catch (error) {
+      console.error('处理问题时出错: ', error);
+
+      if (currentPanelPort) {
+        try {
+          currentPanelPort.postMessage({
+            type: 'ERROR',
+            error: '处理问题失败: ' + (error as Error).message,
+            requestId: requestId,
+          });
+        } catch (sendError) {
+          console.error('发送错误消息失败: ', sendError);
+        }
+        currentPanelPort = null;
+      }
+
+      sendResponse({
+        success: false,
+        error:
+          error instanceof Error ? error.message : '处理问题时出现未知错误',
+      });
+    }
+  }
+
+  /**
+   * 终止所有AI相关任务
+   * @param options - 终止选项
+   */
+  public terminateTasks(options: TerminateOptions): void {
+    console.log('终止所有相关任务');
+
+    // 中断当前AI进程
+    if (this.currentAIProcess) {
+      try {
+        this.currentAIProcess.abort();
+      } catch (error) {
+        console.error('终止AI进程失败: ', error);
+      }
+      this.currentAIProcess = null;
+    }
+
+    // 清理资源
+    this.cleanup();
+
+    // 根据不同的响应方式返回结果
+    if (options.responseMethod === 'sendResponse' && options.sendResponse) {
+      options.sendResponse({
+        type: 'terminated',
+        message: '所有任务已终止',
+        status: 'success',
+      });
+    } else if (options.responseMethod === 'portMessage' && options.port) {
+      try {
+        options.port.postMessage({
+          type: 'TASK_TERMINATED',
+          message: 'AI任务已终止',
+          requestId: options.requestId,
+        });
+      } catch (error) {
+        console.error('发送终止任务消息失败: ', error);
+      }
     }
   }
 
@@ -268,6 +560,125 @@ export class AIService {
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
+    }
+  }
+
+  /**
+   * 生成反馈选项
+   * @param prompt - 原始提示词
+   * @param panelPort - 长连接端口
+   * @param requestId - 请求ID
+   */
+  private async generateFeedbackOptions(
+    prompt: string,
+    panelPort: chrome.runtime.Port,
+    requestId: string
+  ): Promise<void> {
+    try {
+      const feedbackPrompt = `
+根据用户的问题和AI的回答，生成三个可能的进一步操作选项，用于用户交互。
+
+原始问题和回答上下文：
+${prompt}
+
+请生成三个简洁、具体的选项，每个选项应该是一个完整的问题或请求，用户可以直接点击使用。
+
+选项要求：
+1. 每个选项长度不超过50个字符
+2. 选项应该与上下文相关，提供有意义的下一步操作
+3. 选项应该多样化，涵盖不同的可能需求
+4. 选项应该以用户的语气表达
+
+请返回一个JSON数组，格式如下：
+{
+  "options": [
+    { "id": "option_1", "text": "选项1文本" },
+    { "id": "option_2", "text": "选项2文本" },
+    { "id": "option_3", "text": "选项3文本" }
+  ]
+}
+
+只返回JSON，不要其他内容。`;
+
+      // 收集AI生成的完整响应
+      let fullResponse = '';
+
+      // 使用aiService生成反馈选项
+      await this.sendMessageWithStream(feedbackPrompt, undefined, undefined, {
+        // 收集每个数据块
+        onChunk: (chunk: string, _isFirst: boolean) => {
+          fullResponse += chunk;
+        },
+        // 响应完成后处理结果
+        onComplete: () => {
+          try {
+            // 解析AI生成的JSON响应
+            let feedbackOptions = [];
+            try {
+              const parsedResponse = JSON.parse(fullResponse);
+              feedbackOptions = parsedResponse.options || [];
+            } catch (parseError) {
+              console.error('解析反馈选项失败，使用默认选项: ', parseError);
+              // 如果解析失败，使用默认选项
+              feedbackOptions = [
+                {
+                  id: `option_${Date.now()}_1`,
+                  text: '帮我优化这个页面的性能',
+                },
+                {
+                  id: `option_${Date.now()}_2`,
+                  text: '分析这个组件的CSS样式',
+                },
+                {
+                  id: `option_${Date.now()}_3`,
+                  text: '解释这个功能的实现原理',
+                },
+              ];
+            }
+
+            // 为每个选项生成唯一ID
+            const optionsWithIds = feedbackOptions.map(
+              (option: any, index: number) => ({
+                id: `option_${requestId}_${index + 1}`,
+                text: option.text || option.content || `选项${index + 1}`,
+              })
+            );
+
+            // 发送生成的反馈选项
+            panelPort.postMessage({
+              type: 'FEEDBACK_OPTIONS_GENERATED',
+              requestId: requestId,
+              options: optionsWithIds,
+            });
+          } catch (error) {
+            console.error('处理反馈选项失败: ', error);
+            // 发送错误通知
+            panelPort.postMessage({
+              type: 'FEEDBACK_OPTIONS_ERROR',
+              requestId: requestId,
+              error: '生成反馈选项失败',
+            });
+          }
+        },
+        // 错误处理
+        onError: (error: Error) => {
+          console.error('生成反馈选项时AI调用失败: ', error);
+          // 发送错误通知
+          panelPort.postMessage({
+            type: 'FEEDBACK_OPTIONS_ERROR',
+            requestId: requestId,
+            error: '生成反馈选项失败',
+          });
+        },
+      });
+    } catch (error) {
+      console.error('生成反馈选项失败: ', error);
+      // 发送错误通知
+      panelPort.postMessage({
+        type: 'FEEDBACK_OPTIONS_ERROR',
+        requestId: requestId,
+        error: '生成反馈选项失败',
+      });
     }
   }
 

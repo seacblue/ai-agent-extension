@@ -6,24 +6,6 @@ export const API_CONFIG = {
   VOLCES: {
     API_URL: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
     MODEL: 'doubao-seed-1-6-251015',
-    // 从环境变量获取 API 密钥
-    getApiKey: async () => {
-      // 在开发环境中，可以通过 import.meta.env 获取环境变量
-      // 在扩展环境中，需要通过其他方式获取
-      if (typeof import.meta !== 'undefined' && import.meta.env) {
-        return import.meta.env.VOLCES_API_KEY || '';
-      }
-      // 从 Chrome 存储中获取
-      return await getApiKeyFromStorage();
-    },
-    // 获取用于 API 调用的短期令牌
-    getAuthToken: async () => {
-      const apiKey = await API_CONFIG.VOLCES.getApiKey();
-      if (!apiKey) return '';
-
-      const cryptoService = CryptoService.getInstance();
-      return await cryptoService.generateShortLivedToken(apiKey);
-    },
   },
 };
 

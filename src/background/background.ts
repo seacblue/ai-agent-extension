@@ -5,10 +5,7 @@ import {
   handleClearApiKey,
 } from '../shared/services/api';
 import { LongConnectionManager } from '../shared/services/longConnectionManager';
-import {
-  AIProcessService,
-  TerminateOptions,
-} from '../shared/services/aiProcess';
+import { AIService, TerminateOptions } from '../shared/services/aiService';
 
 // 扩展启动或安装时获取并保持 API Key
 chrome.runtime.onStartup.addListener(async () => {
@@ -120,8 +117,8 @@ chrome.runtime.onConnect.addListener(port => {
 // 处理终止请求
 function terminateTasks(options: TerminateOptions) {
   try {
-    const aiProcessService = AIProcessService.getInstance();
-    aiProcessService.terminateTasks(options);
+    const aiService = AIService.getInstance();
+    aiService.terminateTasks(options);
     const connectionManager = LongConnectionManager.getInstance();
     connectionManager.cleanup();
   } catch (error) {
@@ -143,8 +140,8 @@ async function handleQuestion(
   sendResponse: (response: any) => void
 ) {
   try {
-    const aiProcessService = AIProcessService.getInstance();
-    await aiProcessService.handleQuestion({
+    const aiService = AIService.getInstance();
+    await aiService.handleQuestion({
       question,
       requestId,
       sender,
@@ -154,7 +151,7 @@ async function handleQuestion(
       LongConnectionManager,
     });
   } catch (error) {
-    console.error('调用 AIProcessService 处理问题失败: ', error);
+    console.error('调用 AIService 处理问题失败: ', error);
     sendResponse({
       success: false,
       error: error instanceof Error ? error.message : '处理问题时出现未知错误',
