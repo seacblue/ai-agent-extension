@@ -10,16 +10,26 @@ export interface ThinkingStep {
 }
 
 /**
+ * 反馈选项接口
+ */
+export interface FeedbackOption {
+  id: string;
+  text: string;
+}
+
+/**
  * 聊天消息接口
  */
 export interface Message {
   id: number;
-  type: 'USER' | 'ASSISTANT' | 'THINKING';
+  type: 'USER' | 'ASSISTANT' | 'THINKING' | 'FEEDBACK';
   content: string;
   timestamp: string;
   status: 'success' | 'error';
   completed?: boolean;
   thinkingSteps?: ThinkingStep[];
+  feedbackOptions?: FeedbackOption[];
+  isGeneratingOptions?: boolean;
 }
 
 /**

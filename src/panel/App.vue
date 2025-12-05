@@ -25,6 +25,7 @@
             :is-streaming="isStreaming"
             :current-streaming-message="currentStreamingMessage"
             @copy-to-clipboard="copyToClipboard"
+            @select-feedback-option="handleFeedbackOptionSelect"
           />
         </div>
 
@@ -80,6 +81,19 @@ const isStreaming = ref(false);
 // 消息服务实例
 const messageService = new MessageService({
   onMessageAdded: message => {
+    // 处理反馈相关的特殊消息
+    if (message.type === 'ASSISTANT' && message.feedbackOptions) {
+      // 查找最后一条ASSISTANT消息并添加反馈选项
+      const lastAssistantMessage = [...messages]
+        .reverse()
+        .find(m => m.type === 'ASSISTANT');
+      if (lastAssistantMessage) {
+        lastAssistantMessage.feedbackOptions = message.feedbackOptions;
+        lastAssistantMessage.isGeneratingOptions = false;
+        return;
+      }
+    }
+
     // 处理思考完成的特殊消息
     if (
       message.type === 'THINKING' &&
@@ -149,6 +163,12 @@ const removeSelectedElement = () => {
 };
 const sendMessage = async () => {
   if (!messageInputRef.value?.getInputText().trim()) return;
+
+  // 清除所有消息的反馈选项生成状态
+  messages.forEach(msg => {
+    msg.isGeneratingOptions = false;
+  });
+
   const userInputText = messageInputRef.value.getInputText();
   messageInputRef.value.clearInput();
   await messageService.sendMessage(
@@ -158,6 +178,13 @@ const sendMessage = async () => {
       isSending.value = sending;
     }
   );
+};
+
+// 处理反馈选项选择
+const handleFeedbackOptionSelect = (optionText: string) => {
+  if (messageInputRef.value) {
+    messageInputRef.value.setInputText(optionText);
+  }
 };
 
 const terminateMessage = async () => {

@@ -194,13 +194,19 @@ const clearInput = () => {
 // 获取输入框内容
 const getInputText = () => inputText.value;
 
+// 设置输入框内容
+const setInputText = (text: string) => {
+  inputText.value = text;
+  adjustTextareaHeight();
+};
+
 // 重置元素选择状态
 const resetElementSelector = () => {
   isSelectingElement.value = false;
 };
 
 // 暴露方法给父组件
-defineExpose({ clearInput, getInputText, resetElementSelector });
+defineExpose({ clearInput, getInputText, setInputText, resetElementSelector });
 onMounted(() => {
   adjustTextareaHeight();
 });

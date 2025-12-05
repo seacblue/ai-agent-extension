@@ -1,21 +1,5 @@
 import { generateId, getCurrentTimestamp } from './timeService';
-
-// 类型定义
-export interface Message {
-  id: number;
-  type: 'USER' | 'ASSISTANT' | 'THINKING';
-  content: string;
-  timestamp: string;
-  status: 'success' | 'error';
-  completed?: boolean;
-  thinkingSteps?: ThinkingStep[];
-}
-
-export interface ThinkingStep {
-  id: number;
-  content: string;
-  timestamp: string;
-}
+import { Message, ThinkingStep } from '../types/chat';
 
 export interface SelectedElement {
   id: string;
@@ -73,7 +57,6 @@ export class MessageService {
   private onError?: (error: string) => void;
 
   constructor(options?: MessageServiceOptions) {
-    this.onMessageAdded = options?.onMessageAdded;
     if (options?.onStreamingStarted) {
       this.onStreamingStarted = options.onStreamingStarted.bind(this);
     }
@@ -82,6 +65,7 @@ export class MessageService {
     }
     this.onStreamingComplete = options?.onStreamingComplete;
     this.onError = options?.onError;
+    this.onMessageAdded = options?.onMessageAdded;
 
     this.handleStreamingContent = this.handleStreamingContent.bind(this);
     this.handleBackgroundResponse = this.handleBackgroundResponse.bind(this);
@@ -205,7 +189,9 @@ export class MessageService {
         console.warn('取消之前请求失败: ', error);
       }
     }
-
+    if (this.currentStreamingMessage) {
+      this.currentStreamingMessage = null;
+    }
     // 生成新的请求 ID
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     this.currentRequestId = requestId;
@@ -281,19 +267,12 @@ export class MessageService {
         console.warn('无法从 DevTools 获取标签页 ID: ', devtoolsError);
       }
 
-      const response = await chrome.runtime.sendMessage({
+      await chrome.runtime.sendMessage({
         type: 'ASK_QUESTION',
         question: fullQuestion, // 使用包含元素信息的完整问题
         tabId, // 传递标签页 ID
         requestId, // 传递请求 ID
       });
-
-      // 检查响应是否匹配当前请求 ID
-      if (response && response.requestId === this.currentRequestId) {
-        this.handleBackgroundResponse(response);
-      } else {
-        console.log('忽略过期请求的响应: ', response);
-      }
     } catch (error) {
       this.finishThinkingProcess();
       console.error('发送消息失败: ', error);
@@ -362,13 +341,39 @@ export class MessageService {
         this.isStreaming = false;
         if (this.currentStreamingMessage) {
           this.currentStreamingMessage.timestamp = getCurrentTimestamp();
+          this.currentStreamingMessage.feedbackOptions = undefined;
+          this.currentStreamingMessage.isGeneratingOptions = true;
+        }
+
+        this.onStreamingComplete?.();
+        break;
+
+      case 'FEEDBACK_OPTIONS_GENERATED':
+        if (this.currentStreamingMessage) {
+          this.currentStreamingMessage.isGeneratingOptions = false;
           this.currentStreamingMessage = null;
         }
-        this.accumulatedContent = ''; // 重置累积内容
-        this.currentRequestId = null; // 清理请求 ID
+        this.accumulatedContent = '';
+        this.currentRequestId = null;
 
-        // 触发流式完成回调
-        this.onStreamingComplete?.();
+        const optionsMessage: Message = {
+          id: generateId(),
+          type: 'FEEDBACK',
+          content: '',
+          timestamp: getCurrentTimestamp(),
+          status: 'success',
+          feedbackOptions: response.options,
+        };
+        this.onMessageAdded?.(optionsMessage);
+        break;
+
+      case 'FEEDBACK_OPTIONS_ERROR':
+        if (this.currentStreamingMessage) {
+          this.currentStreamingMessage.isGeneratingOptions = false;
+          this.currentStreamingMessage = null;
+        }
+        this.accumulatedContent = '';
+        this.currentRequestId = null;
         break;
 
       case 'ERROR':
@@ -392,31 +397,32 @@ export class MessageService {
         break;
 
       case 'ELEMENT_SELECTED_RESULT':
-        // 这个消息由 App.vue 处理
         break;
 
       default:
         // 兼容旧格式，统一处理
-        this.finishThinkingProcess();
-        {
-          const content = response.answer || response.content || response.error;
-          if (content) {
-            const status = response.error ? 'error' : 'success';
-            const message: Message = {
-              id: generateId(),
-              type: 'ASSISTANT',
-              content,
-              timestamp: getCurrentTimestamp(),
-              status,
-            };
-            this.onMessageAdded?.(message);
-          } else {
-            // 记录未知响应格式
-            console.warn('收到未知格式的响应: ', response);
-            this.onError?.('收到未知格式的响应');
+        if (!this.isStreaming) {
+          this.finishThinkingProcess();
+          {
+            const content =
+              response.answer || response.content || response.error;
+            if (content) {
+              const status = response.error ? 'error' : 'success';
+              const message: Message = {
+                id: generateId(),
+                type: 'ASSISTANT',
+                content,
+                timestamp: getCurrentTimestamp(),
+                status,
+              };
+              this.onMessageAdded?.(message);
+            } else {
+              // 记录未知响应格式
+              console.warn('收到未知格式的响应: ', response);
+              this.onError?.(response.error);
+            }
           }
         }
-        this.currentRequestId = null; // 清理请求 ID
     }
   }
 
@@ -480,6 +486,7 @@ export class MessageService {
 
     if (this.currentStreamingMessage) {
       this.currentStreamingMessage.timestamp = getCurrentTimestamp();
+      this.currentStreamingMessage.isGeneratingOptions = false;
       this.currentStreamingMessage = null;
     }
   }

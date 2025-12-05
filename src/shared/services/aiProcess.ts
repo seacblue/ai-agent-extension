@@ -1,5 +1,5 @@
 // AI处理服务，封装AI进程管理和任务处理功能
-import { AIService } from './aiService';
+import { AIService, AnalysisDecision } from './aiService';
 
 /**
  * 终止任务选项接口
@@ -22,15 +22,6 @@ export interface QuestionOptions {
   panelPort?: chrome.runtime.Port | null;
   getApiKeyFromStorage?: () => Promise<string>;
   LongConnectionManager?: any;
-}
-
-/**
- * Analysis决策接口
- */
-export interface AnalysisDecision {
-  shouldAnalyzeDOM: boolean;
-  shouldAnalyzeCSS: boolean;
-  targetElement?: string;
 }
 
 /**
@@ -108,32 +99,6 @@ export class AIProcessService {
       } catch (error) {
         console.error('发送终止任务消息失败: ', error);
       }
-    }
-  }
-
-  /**
-   * 数据截断函数
-   * @param data - 要截断的数据
-   * @param maxLength - 最大长度
-   * @returns 截断后的数据
-   */
-  private truncateData(data: any, maxLength: number = 10000): string {
-    try {
-      const jsonString = JSON.stringify(data, null, 2);
-      if (jsonString.length > maxLength) {
-        console.log(
-          `数据被截断，原始长度: ${jsonString.length}，截断后长度: ${maxLength}`
-        );
-        // 保留数据的主要结构
-        return (
-          jsonString.substring(0, maxLength - 100) +
-          '... [数据被截断以避免token超限]'
-        );
-      }
-      return jsonString;
-    } catch (e) {
-      console.error('数据序列化失败:', e);
-      return '[数据序列化失败]';
     }
   }
 
@@ -309,7 +274,7 @@ export class AIProcessService {
             domResult.results &&
             domResult.results.length > 0
           ) {
-            const truncatedDomData = this.truncateData(
+            const truncatedDomData = this.aiService.truncateData(
               domResult.results[0].data,
               8000
             );
@@ -363,7 +328,7 @@ export class AIProcessService {
             cssResult.results &&
             cssResult.results.length > 0
           ) {
-            const truncatedCssData = this.truncateData(
+            const truncatedCssData = this.aiService.truncateData(
               cssResult.results[0].data,
               5000
             );
@@ -455,6 +420,13 @@ export class AIProcessService {
                   type: 'STREAMING_COMPLETE',
                   requestId: requestId,
                 });
+
+                // 触发生成反馈选项
+                this.generateFeedbackOptions(
+                  finalPrompt,
+                  currentPanelPort,
+                  requestId
+                );
               } catch (error) {
                 console.error('发送完成消息失败: ', error);
               }
@@ -526,6 +498,130 @@ export class AIProcessService {
         shouldAnalyzeDOM: false,
         shouldAnalyzeCSS: false,
       };
+    }
+  }
+
+  /**
+   * 生成反馈选项
+   * @param prompt - 原始提示词
+   * @param panelPort - 长连接端口
+   * @param requestId - 请求ID
+   */
+  private async generateFeedbackOptions(
+    prompt: string,
+    panelPort: chrome.runtime.Port,
+    requestId: string
+  ): Promise<void> {
+    try {
+      const feedbackPrompt = `
+根据用户的问题和AI的回答，生成三个可能的进一步操作选项，用于用户交互。
+
+原始问题和回答上下文：
+${prompt}
+
+请生成三个简洁、具体的选项，每个选项应该是一个完整的问题或请求，用户可以直接点击使用。
+
+选项要求：
+1. 每个选项长度不超过50个字符
+2. 选项应该与上下文相关，提供有意义的下一步操作
+3. 选项应该多样化，涵盖不同的可能需求
+4. 选项应该以用户的语气表达
+
+请返回一个JSON数组，格式如下：
+{
+  "options": [
+    { "id": "option_1", "text": "选项1文本" },
+    { "id": "option_2", "text": "选项2文本" },
+    { "id": "option_3", "text": "选项3文本" }
+  ]
+}
+
+只返回JSON，不要其他内容。`;
+
+      // 收集AI生成的完整响应
+      let fullResponse = '';
+
+      // 使用aiService生成反馈选项
+      await this.aiService.sendMessageWithStream(
+        feedbackPrompt,
+        undefined,
+        undefined,
+        {
+          // 收集每个数据块
+          onChunk: (chunk: string, _isFirst: boolean) => {
+            fullResponse += chunk;
+          },
+          // 响应完成后处理结果
+          onComplete: () => {
+            try {
+              // 解析AI生成的JSON响应
+              let feedbackOptions = [];
+              try {
+                const parsedResponse = JSON.parse(fullResponse);
+                feedbackOptions = parsedResponse.options || [];
+              } catch (parseError) {
+                console.error('解析反馈选项失败，使用默认选项: ', parseError);
+                // 如果解析失败，使用默认选项
+                feedbackOptions = [
+                  {
+                    id: `option_${Date.now()}_1`,
+                    text: '帮我优化这个页面的性能',
+                  },
+                  {
+                    id: `option_${Date.now()}_2`,
+                    text: '分析这个组件的CSS样式',
+                  },
+                  {
+                    id: `option_${Date.now()}_3`,
+                    text: '解释这个功能的实现原理',
+                  },
+                ];
+              }
+
+              // 为每个选项生成唯一ID
+              const optionsWithIds = feedbackOptions.map(
+                (option: any, index: number) => ({
+                  id: `option_${requestId}_${index + 1}`,
+                  text: option.text || option.content || `选项${index + 1}`,
+                })
+              );
+
+              // 发送生成的反馈选项
+              panelPort.postMessage({
+                type: 'FEEDBACK_OPTIONS_GENERATED',
+                requestId: requestId,
+                options: optionsWithIds,
+              });
+            } catch (error) {
+              console.error('处理反馈选项失败: ', error);
+              // 发送错误通知
+              panelPort.postMessage({
+                type: 'FEEDBACK_OPTIONS_ERROR',
+                requestId: requestId,
+                error: '生成反馈选项失败',
+              });
+            }
+          },
+          // 错误处理
+          onError: (error: Error) => {
+            console.error('生成反馈选项时AI调用失败: ', error);
+            // 发送错误通知
+            panelPort.postMessage({
+              type: 'FEEDBACK_OPTIONS_ERROR',
+              requestId: requestId,
+              error: '生成反馈选项失败',
+            });
+          },
+        }
+      );
+    } catch (error) {
+      console.error('生成反馈选项失败: ', error);
+      // 发送错误通知
+      panelPort.postMessage({
+        type: 'FEEDBACK_OPTIONS_ERROR',
+        requestId: requestId,
+        error: '生成反馈选项失败',
+      });
     }
   }
 

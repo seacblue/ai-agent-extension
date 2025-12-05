@@ -1,82 +1,123 @@
 <template>
-  <div :class="messageClasses" @click="onMessageClick(message.id)">
-    <div class="message-background"></div>
-    <div class="message-content-wrapper">
-      <!-- 普通消息内容 -->
-      <div v-if="message.type !== 'THINKING'" class="message-content">
-        <!-- AI 助手消息使用 Markdown 渲染 -->
-        <MarkdownRenderer
-          v-if="message.type === 'ASSISTANT'"
-          :content="message.content"
-        />
-        <!-- 用户消息直接显示 -->
-        <span v-else>{{ message.content }}</span>
-      </div>
-
-      <!-- 思考过程消息 -->
-      <div v-else class="thinking-content">
-        <div class="thinking-steps">
-          <div
-            v-for="(step, index) in message.thinkingSteps"
-            :key="step.id"
-            class="thinking-step"
-            :class="{
-              'new-step': isNewStep(step.id),
-              'thinking-complete':
-                isThinkingComplete(message) &&
-                index === message.thinkingSteps!.length - 1,
-            }"
-          >
-            <div class="step-content">{{ step.content }}</div>
-          </div>
-        </div>
-        <div v-if="!isThinkingComplete(message)" class="thinking-progress">
-          <span>思考进行中</span>
-          <div class="progress-dots">
-            <div class="progress-dot"></div>
-            <div class="progress-dot"></div>
-            <div class="progress-dot"></div>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="message.type !== 'THINKING'" class="message-footer">
-        <div v-if="message.type === 'USER'" class="message-time">
-          {{ message.timestamp }}
+  <!-- 普通消息（非FEEDBACK类型） -->
+  <template v-if="message.type !== 'FEEDBACK'">
+    <!-- 消息主体 -->
+    <div :class="messageClasses" @click="onMessageClick(message.id)">
+      <div class="message-background"></div>
+      <div class="message-content-wrapper">
+        <!-- 普通消息内容 -->
+        <div v-if="message.type !== 'THINKING'" class="message-content">
+          <!-- AI 助手消息使用 Markdown 渲染 -->
+          <MarkdownRenderer
+            v-if="message.type === 'ASSISTANT'"
+            :content="message.content"
+          />
+          <!-- 用户消息直接显示 -->
+          <span v-else>{{ message.content }}</span>
         </div>
 
-        <!-- 助手消息的操作按钮 -->
-        <template v-if="message.type === 'ASSISTANT'">
-          <!-- 复制按钮 -->
-          <button
-            class="copy-button"
-            @click.stop="copyToClipboard(message.content)"
-            :title="'复制'"
-          >
-            <img src="/icons/copy.png" alt="复制" class="copy-icon" />
-          </button>
-
-          <!-- 时间戳或加载指示器 -->
-          <div class="message-time">
-            <!-- 流式传输期间显示加载指示器，完成后显示时间戳 -->
+        <!-- 思考过程消息 -->
+        <div v-else class="thinking-content">
+          <div class="thinking-steps">
             <div
-              v-if="
-                isStreaming &&
-                currentStreamingMessage &&
-                currentStreamingMessage.id === message.id &&
-                !message.timestamp
-              "
-              class="loading-indicator"
+              v-for="(step, index) in message.thinkingSteps"
+              :key="step.id"
+              class="thinking-step"
+              :class="{
+                'new-step': isNewStep(step.id),
+                'thinking-complete':
+                  message.completed === true &&
+                  index === message.thinkingSteps!.length - 1,
+              }"
             >
-              <div class="loading-spinner"></div>
-              <span>正在生成回复...</span>
+              <div class="step-content">{{ step.content }}</div>
             </div>
-            <div v-else>{{ message.timestamp }}</div>
           </div>
-        </template>
+          <div v-if="message.completed === false" class="thinking-progress">
+            <span>思考进行中</span>
+            <div class="progress-dots">
+              <div class="progress-dot"></div>
+              <div class="progress-dot"></div>
+              <div class="progress-dot"></div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="message.type !== 'THINKING'" class="message-footer">
+          <div v-if="message.type === 'USER'" class="message-time">
+            {{ message.timestamp }}
+          </div>
+
+          <!-- 助手消息的操作按钮 -->
+          <template v-if="message.type === 'ASSISTANT'">
+            <!-- 复制按钮 -->
+            <button
+              class="copy-button"
+              @click.stop="copyToClipboard(message.content)"
+              :title="'复制'"
+            >
+              <img src="/icons/copy.png" alt="复制" class="copy-icon" />
+            </button>
+
+            <!-- 时间戳或加载指示器 -->
+            <div class="message-time">
+              <!-- 流式传输期间显示加载指示器，完成后显示时间戳 -->
+              <div
+                v-if="
+                  isStreaming &&
+                  currentStreamingMessage &&
+                  currentStreamingMessage.id === message.id &&
+                  !message.timestamp
+                "
+                class="loading-indicator"
+              >
+                <div class="loading-spinner"></div>
+                <span>正在生成回复...</span>
+              </div>
+              <div v-else>{{ message.timestamp }}</div>
+            </div>
+          </template>
+        </div>
       </div>
     </div>
-  </div>
+
+    <!-- 生成反馈选项的加载指示器 -->
+    <template
+      v-if="
+        message.type === 'ASSISTANT' &&
+        message.status === 'success' &&
+        message.isGeneratingOptions === true
+      "
+    >
+      <div class="thinking-progress feedback-progress">
+        <span>生成反馈中</span>
+        <div class="progress-dots">
+          <div class="progress-dot"></div>
+          <div class="progress-dot"></div>
+          <div class="progress-dot"></div>
+        </div>
+      </div>
+    </template>
+  </template>
+
+  <!-- FEEDBACK类型消息 - 只显示反馈选项，没有边框和其他内容 -->
+  <template v-else>
+    <template
+      v-if="message.feedbackOptions && message.feedbackOptions.length > 0"
+    >
+      <div class="feedback-options">
+        <button
+          v-for="(option, index) in message.feedbackOptions"
+          :key="option.id"
+          class="feedback-option-button"
+          :style="{ animationDelay: `${index * 100}ms` }"
+          @click.stop="selectFeedbackOption(option.text)"
+        >
+          {{ option.text }}
+        </button>
+      </div>
+    </template>
+  </template>
 </template>
 
 <script setup lang="ts">
@@ -102,22 +143,19 @@ const emit = defineEmits<{
   'message-click': [messageId: number];
   'copy-to-clipboard': [content: string];
   'retry-generation': [];
+  'select-feedback-option': [optionText: string];
 }>();
 
 // 计算消息样式类
 const messageClasses = computed(() => ({
-  message: true,
+  message: props.message.type,
   user: props.message.type === 'USER',
   assistant: props.message.type === 'ASSISTANT',
   thinking: props.message.type === 'THINKING',
+  feedback: props.message.type === 'FEEDBACK',
   'status-success': props.message.status === 'success',
   'status-error': props.message.status === 'error',
 }));
-
-// 判断思考是否完成
-const isThinkingComplete = (message: Message): boolean => {
-  return message.completed === true;
-};
 
 // 判断是否为新步骤
 const isNewStep = (stepId: number): boolean => {
@@ -132,6 +170,11 @@ const onMessageClick = (messageId: number) => {
 // 复制到剪贴板功能
 const copyToClipboard = async (content: string) => {
   emit('copy-to-clipboard', content);
+};
+
+// 选择反馈选项
+const selectFeedbackOption = (optionText: string) => {
+  emit('select-feedback-option', optionText);
 };
 </script>
 
@@ -151,6 +194,44 @@ const copyToClipboard = async (content: string) => {
 .message:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.message:has(.feedback-options),
+.message:has(.feedback-options-loading) {
+  transition: none;
+  cursor: default;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.message:has(.feedback-options):hover,
+.message:has(.feedback-options-loading):hover {
+  transform: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* 反馈消息样式 */
+.feedback-message {
+  color: #333;
+  margin-right: auto;
+  padding: 4px 16px;
+  margin-bottom: 4px;
+  max-width: 75%;
+  position: relative;
+  overflow: hidden;
+  animation: slideIn 0.3s ease-out;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  cursor: default;
+  transition: none;
+  transform: none;
+}
+
+.feedback-message:hover {
+  transform: translateY(2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  filter: none;
 }
 .message:active {
   transform: translateY(0);
@@ -438,6 +519,12 @@ const copyToClipboard = async (content: string) => {
   gap: 6px;
 }
 
+/* 反馈生成进度指示器 */
+.feedback-progress {
+  margin-left: 8px;
+  margin-bottom: 8px;
+}
+
 .progress-dots {
   display: flex;
   gap: 2px;
@@ -468,6 +555,78 @@ const copyToClipboard = async (content: string) => {
   50% {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* 反馈选项样式 */
+.feedback-options-loading {
+  display: none;
+}
+
+.feedback-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  margin-bottom: 16px;
+  padding: 0;
+  background: transparent;
+  animation: fadeIn 0.3s ease-out;
+  max-width: 75%;
+}
+
+.feedback-option-button {
+  padding: 8px 16px;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transform: translateX(-10px);
+  animation: optionSlideIn 0.4s ease-out forwards;
+  white-space: normal;
+  width: 100%;
+  max-width: 100%;
+  text-align: left;
+}
+
+.feedback-option-button:hover {
+  background: #f0f7ff;
+  color: #0056b3;
+  border-color: #b3d7ff;
+  box-shadow: 0 3px 10px rgba(0, 123, 255, 0.15);
+  transform: translateY(-1px) translateX(0);
+}
+
+.feedback-option-button:active {
+  transform: translateY(0) translateX(0) scale(1.04);
+  box-shadow: 0 1px 6px rgba(0, 123, 255, 0.2);
+  transition: all 0.1s ease;
+}
+
+@keyframes optionSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 </style>
