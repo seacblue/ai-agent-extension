@@ -6,7 +6,7 @@
  * 生成唯一 ID（基于时间戳）
  */
 export function generateId(): number {
-  return Date.now();
+  return Date.now() + Math.floor(Math.random() * 1000);
 }
 
 /**

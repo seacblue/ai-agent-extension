@@ -344,6 +344,8 @@ export class MessageService {
           this.currentStreamingMessage.feedbackOptions = undefined;
           this.currentStreamingMessage.isGeneratingOptions = true;
         }
+        this.accumulatedContent = '';
+        this.currentRequestId = null;
 
         this.onStreamingComplete?.();
         break;
@@ -351,6 +353,7 @@ export class MessageService {
       case 'FEEDBACK_OPTIONS_GENERATED':
         if (this.currentStreamingMessage) {
           this.currentStreamingMessage.isGeneratingOptions = false;
+          this.onMessageAdded?.(this.currentStreamingMessage);
           this.currentStreamingMessage = null;
         }
         this.accumulatedContent = '';
@@ -370,6 +373,7 @@ export class MessageService {
       case 'FEEDBACK_OPTIONS_ERROR':
         if (this.currentStreamingMessage) {
           this.currentStreamingMessage.isGeneratingOptions = false;
+          this.onMessageAdded?.(this.currentStreamingMessage);
           this.currentStreamingMessage = null;
         }
         this.accumulatedContent = '';

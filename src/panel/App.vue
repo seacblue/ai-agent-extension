@@ -81,6 +81,15 @@ const isStreaming = ref(false);
 // 消息服务实例
 const messageService = new MessageService({
   onMessageAdded: message => {
+    const existingMessageIndex = messages.findIndex(m => m.id === message.id);
+    if (existingMessageIndex !== -1) {
+      messages[existingMessageIndex] = {
+        ...messages[existingMessageIndex],
+        ...message,
+      };
+      return;
+    }
+
     // 处理反馈相关的特殊消息
     if (message.type === 'ASSISTANT' && message.feedbackOptions) {
       // 查找最后一条ASSISTANT消息并添加反馈选项

@@ -89,7 +89,7 @@
         message.isGeneratingOptions === true
       "
     >
-      <div class="thinking-progress feedback-progress">
+      <div class="feedback-progress">
         <span>生成反馈中</span>
         <div class="progress-dots">
           <div class="progress-dot"></div>
@@ -113,7 +113,12 @@
           :style="{ animationDelay: `${index * 100}ms` }"
           @click.stop="selectFeedbackOption(option.text)"
         >
-          {{ option.text }}
+          <img
+            src="/icons/right_arrow.png"
+            alt="Arrow"
+            class="feedback-option-icon"
+          />
+          <span class="feedback-option-text">{{ option.text }}</span>
         </button>
       </div>
     </template>
@@ -521,8 +526,16 @@ const selectFeedbackOption = (optionText: string) => {
 
 /* 反馈生成进度指示器 */
 .feedback-progress {
+  margin-top: 4px;
   margin-left: 8px;
-  margin-bottom: 8px;
+  padding: 3px 0 3px 8px;
+  background-color: #f9fafb;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #9ca3af;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .progress-dots {
@@ -586,24 +599,43 @@ const selectFeedbackOption = (optionText: string) => {
   transition: all 0.3s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   opacity: 0;
-  transform: translateX(-10px);
+  transform: translateX(-10px) translateY(0);
   animation: optionSlideIn 0.4s ease-out forwards;
   white-space: normal;
   width: 100%;
   max-width: 100%;
   text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.feedback-option-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  transition: transform 0.3s ease;
+  transform: translate(-4px) scale(1.25);
+}
+
+.feedback-option-text {
+  flex-grow: 1;
 }
 
 .feedback-option-button:hover {
   background: #f0f7ff;
   color: #0056b3;
   border-color: #b3d7ff;
-  box-shadow: 0 3px 10px rgba(0, 123, 255, 0.15);
-  transform: translateY(-1px) translateX(0);
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+  transform: translateY(-4px);
+}
+
+.feedback-option-button:hover .feedback-option-icon {
+  transform: translate(-2px) scale(1.25);
 }
 
 .feedback-option-button:active {
-  transform: translateY(0) translateX(0) scale(1.04);
+  transform: translateY(0);
   box-shadow: 0 1px 6px rgba(0, 123, 255, 0.2);
   transition: all 0.1s ease;
 }
