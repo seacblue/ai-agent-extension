@@ -1,5 +1,5 @@
 import { registerAllTools, ToolManagerImpl } from '../tools';
-import { elementSelector } from '../shared/services/elementSelector';
+import { elementSelector } from '../shared/services/elementSelector.ts';
 registerAllTools();
 
 // 监听来自 DevTools Panel 的消息

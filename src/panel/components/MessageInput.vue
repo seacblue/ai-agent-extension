@@ -3,7 +3,7 @@
     <!-- 元素信息显示区域 -->
     <div v-if="selectedElement" class="attachment-content">
       <div class="element-name">
-        {{ MessageService.generateElementSummary(selectedElement.elementData) }}
+        {{ ElementService.generateElementSummary(selectedElement.elementData) }}
       </div>
       <div class="element-tags">
         <span class="element-tag">{{
@@ -64,7 +64,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from 'vue';
-import { MessageService } from '../../shared/services/messageService';
+import { ElementService } from '../../shared/services/element';
 
 // 定义元素数据的接口
 interface ElementData {
@@ -188,7 +188,9 @@ watch(
 // 清空输入框
 const clearInput = () => {
   inputText.value = '';
-  adjustTextareaHeight();
+  nextTick(() => {
+    adjustTextareaHeight();
+  });
 };
 
 // 获取输入框内容
@@ -197,7 +199,9 @@ const getInputText = () => inputText.value;
 // 设置输入框内容
 const setInputText = (text: string) => {
   inputText.value = text;
-  adjustTextareaHeight();
+  nextTick(() => {
+    adjustTextareaHeight();
+  });
 };
 
 // 重置元素选择状态

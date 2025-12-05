@@ -1,5 +1,6 @@
 import { generateId, getCurrentTimestamp } from './timeService';
 import { Message, ThinkingStep } from '../types/chat';
+import { ElementService } from './element';
 
 export interface SelectedElement {
   id: string;
@@ -20,25 +21,6 @@ export interface MessageServiceOptions {
  */
 export class MessageService {
   private currentRequestId: string | null = null;
-
-  /**
-   * 生成元素信息摘要
-   */
-  public static generateElementSummary(elementData: any): string {
-    if (!elementData) return '未知元素';
-
-    const tagName = elementData.tagName || '未知标签';
-    const className = elementData.className
-      ? `.${elementData.className.split(' ').join('.')}`
-      : '';
-    const id = elementData.id ? `#${elementData.id}` : '';
-    const text = elementData.text
-      ? elementData.text.substring(0, 20) +
-        (elementData.text.length > 20 ? '...' : '')
-      : '';
-
-    return `${tagName}${id}${className}${text ? ` "${text}"` : ''}`;
-  }
   private panelPort: chrome.runtime.Port | null = null;
   private connectionRetryCount = 0;
   private readonly baseConnectionRetryDelay = 1000; // 基础重连延迟
@@ -200,7 +182,7 @@ export class MessageService {
     let fullQuestion = userInputText;
     if (selectedElement && selectedElement.elementData) {
       const elementInfo = selectedElement.elementData;
-      const elementSummary = MessageService.generateElementSummary(elementInfo);
+      const elementSummary = ElementService.generateElementSummary(elementInfo);
 
       // 将元素信息作为上下文附加到问题中
       fullQuestion = `${userInputText}
@@ -212,11 +194,11 @@ export class MessageService {
 - ID: ${elementInfo.id || '无'}
 - 类名: ${elementInfo.className || '无'}
 - 文本内容: ${elementInfo.textContent ? elementInfo.textContent.substring(0, 100) + (elementInfo.textContent.length > 100 ? '...' : '') : '无'}
-- 位置: x=${elementInfo.rect?.x || 0}, y=${elementInfo.rect?.y || 0}
-- 尺寸: ${elementInfo.rect?.width || 0}x${elementInfo.rect?.height || 0}
+- 位置: x=${elementInfo.position?.left || 0}, y=${elementInfo.position?.top || 0}
+- 尺寸: ${elementInfo.position?.width || 0}x${elementInfo.position?.height || 0}
 ---`;
 
-      console.log('将元素信息附加到问题中: ', elementSummary);
+      console.log('将元素信息附加到问题中: ', elementInfo);
     }
 
     // 添加一个小延迟确保 UI 更新
@@ -397,7 +379,7 @@ export class MessageService {
         break;
 
       case 'CONNECTION_ACK':
-        console.log('长连接已确认: ', response.portId);
+        console.log('长连接已确认');
         break;
 
       case 'ELEMENT_SELECTED_RESULT':
